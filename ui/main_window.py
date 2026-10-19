@@ -403,7 +403,7 @@ class MainWindow(ctk.CTk):
 
         self.calib_notebook_btn = ctk.CTkButton(
             calib_nb_row,
-            text="📓 CALIBRATE NOTEBOOK WHEEL (4-STEP)",
+            text="📓 CALIBRATE NOTEBOOK (5-STEP WIZARD)",
             fg_color="#D97706",
             hover_color="#F59E0B",
             text_color="#000000",
@@ -760,10 +760,20 @@ class MainWindow(ctk.CTk):
                 text="ACTIVE (100%)" if state.accelerate else "RELEASED",
                 text_color=ACCENT_GREEN if state.accelerate else TEXT_MUTED
             )
-            self.brake_lbl.configure(
-                text="ACTIVE (BRAKING)" if state.brake else "RELEASED",
-                text_color=ACCENT_RED if state.brake else TEXT_MUTED
-            )
+            if state.brake:
+                if nb and nb.is_detected and nb.is_braking:
+                    self.brake_lbl.configure(
+                        text=f"ACTIVE (PITCH {nb.pitch_angle:+.1f}°)",
+                        text_color=ACCENT_RED
+                    )
+                else:
+                    self.brake_lbl.configure(text="ACTIVE (DOWN ARROW)", text_color=ACCENT_RED)
+            else:
+                p_info = f" (Pitch {nb.pitch_angle:+.1f}°)" if (nb and nb.is_detected) else ""
+                self.brake_lbl.configure(
+                    text=f"RELEASED{p_info}",
+                    text_color=TEXT_MUTED
+                )
 
             # 6. FPS
             self.fps_lbl.configure(text=f"{fps:.1f} FPS")
@@ -813,7 +823,7 @@ class MainWindow(ctk.CTk):
                     self.calib_msg_lbl.configure(text=f"Notebook Calibrated (Neutral: {neutral:+.1f}°)", text_color=ACCENT_GREEN)
                 else:
                     self.calib_msg_lbl.configure(text="Neutral Centered & Calibrated", text_color=ACCENT_GREEN)
-                self.calib_notebook_btn.configure(text="📓 CALIBRATE NOTEBOOK WHEEL (4-STEP)", state="normal")
+                self.calib_notebook_btn.configure(text="📓 CALIBRATE NOTEBOOK (5-STEP WIZARD)", state="normal")
                 self.calib_quick_btn.configure(text="🎯 Quick Hand (2.5s)", state="normal")
                 self.calib_guided_btn.configure(text="📐 Hand Range (3-Step)", state="normal")
 

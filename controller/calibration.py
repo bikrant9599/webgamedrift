@@ -54,10 +54,16 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "steering_mode": "notebook",  # 'notebook', 'two_hand_wheel', 'position', 'tilt'
     "notebook_steering_enabled": True,
     "notebook_neutral_angle": 0.0,
-    "notebook_deadzone_angle": 5.0,     # degrees of deadzone for notebook
+    "notebook_neutral_pitch": 0.0,
+    "notebook_neutral_height": 0.0,
+    "notebook_neutral_width": 0.0,
+    "notebook_deadzone_angle": 5.0,     # degrees of deadzone for notebook steering
     "notebook_max_steer_angle": 32.0,   # degrees for 100% steering deflection
-    "notebook_hsv_lower": [8, 65, 65],   # Orange notebook bounds
-    "notebook_hsv_upper": [32, 255, 255],
+    "notebook_brake_pitch_thresh": 9.0, # degrees of forward tilt to trigger brake
+    "notebook_brake_height_thresh": 0.10, # foreshortening drop ratio to trigger brake
+    "notebook_brake_sensitivity": 1.0,
+    "notebook_hsv_lower": [7, 75, 120],  # Orange notebook bounds
+    "notebook_hsv_upper": [28, 255, 255],
     "notebook_color_name": "Orange",
     "notebook_calibrated": True,
 
@@ -99,15 +105,22 @@ class CalibrationManager:
         self.calibration_phase = "idle"
         self.phase_start_time = 0.0
         self.phase_duration = 2.2         # seconds per phase
+        self.calibration_warning: Optional[str] = None
 
         # Sample buffers
         self.samples_x: List[float] = []
         self.samples_y: List[float] = []
         self.samples_size: List[float] = []
         self.samples_angles: List[float] = []
+        self.samples_pitches: List[float] = []
+        self.samples_heights: List[float] = []
+        self.samples_widths: List[float] = []
         self.left_angles: List[float] = []
         self.right_angles: List[float] = []
+        self.brake_pitches: List[float] = []
+        self.brake_heights: List[float] = []
         self.right_index_confirmed = False
+        self.right_index_lowered_confirmed = False
 
     def load(self) -> None:
         if os.path.exists(self.filepath):
@@ -166,22 +179,24 @@ class CalibrationManager:
     # -----------------------------------------------------------------
     def start_notebook_calibration(self) -> None:
         """
-        Starts the Notebook Calibration Wizard:
-        1. Hold notebook horizontal steady (locks 4 corners & neutral angle, samples color).
-        2. Rotate slightly left (measures left range).
-        3. Rotate slightly right (measures right range).
-        4. Raise right index finger (verifies forward acceleration).
+        Starts the 5-Step Guided Notebook Calibration Wizard:
+        A. Hold notebook in neutral steering position (locks corners, neutral angle, pitch & size).
+        B. Rotate left and right (measures comfortable steering range).
+        C. Perform intended braking movement (forward tilt; checks distinguishability).
+        D. Return notebook to neutral (verifies clean centering & brake release).
+        E. Raise and lower right index finger (verifies gas acceleration).
         """
         self.is_calibrating = True
         self.calibration_type = "notebook_wizard"
         self.calibration_phase = "nb_neutral"
+        self.calibration_warning = None
         self._clear_buffers()
         self.phase_start_time = time.time()
-        logger.info("Started Notebook Calibration Wizard.")
+        logger.info("Started 5-Step Notebook Guided Calibration Wizard.")
 
     def update_notebook_calibration(self, nb_data, hand_data) -> Tuple[bool, str, float]:
         """
-        Feed live notebook & hand telemetry into the notebook calibration wizard.
+        Feed live notebook & hand telemetry into the 5-step notebook calibration wizard.
         Returns: (is_done, message, progress_ratio)
         """
         if not self.is_calibrating or self.calibration_type != "notebook_wizard":
@@ -190,43 +205,51 @@ class CalibrationManager:
         elapsed = time.time() - self.phase_start_time
         progress = min(1.0, elapsed / self.phase_duration)
 
-        # 1. Neutral Position & Corner Locking
+        # -------------------------------------------------------------
+        # STEP A: NEUTRAL STEERING POSITION & CORNER LOCKING
+        # -------------------------------------------------------------
         if self.calibration_phase == "nb_neutral":
             if nb_data.is_detected:
                 self.samples_angles.append(nb_data.raw_angle)
+                self.samples_pitches.append(nb_data.raw_pitch)
+                self.samples_heights.append(nb_data.height)
+                self.samples_widths.append(nb_data.width)
 
             if elapsed >= self.phase_duration:
-                if self.samples_angles:
-                    avg_angle = float(np.mean(self.samples_angles))
-                    self.config["notebook_neutral_angle"] = round(avg_angle, 2)
-                    self.config["notebook_calibrated"] = True
+                if len(self.samples_angles) < 2:
+                    self.is_calibrating = False
+                    self.calibration_phase = "idle"
+                    return False, "⚠️ Notebook not detected steady. Ensure notebook is visible.", 0.0
 
-                self.calibration_phase = "nb_rot_left"
+                avg_angle = float(np.mean(self.samples_angles))
+                avg_pitch = float(np.mean(self.samples_pitches))
+                avg_h = float(np.mean(self.samples_heights))
+                avg_w = float(np.mean(self.samples_widths))
+
+                self.config["notebook_neutral_angle"] = round(avg_angle, 2)
+                self.config["notebook_neutral_pitch"] = round(avg_pitch, 2)
+                self.config["notebook_neutral_height"] = round(avg_h, 1)
+                self.config["notebook_neutral_width"] = round(avg_w, 1)
+                self.config["notebook_calibrated"] = True
+
+                self.calibration_phase = "nb_steer_range"
                 self.phase_start_time = time.time()
                 self._clear_buffers()
-                return False, "Rotate notebook LEFT slightly", 0.0
+                return False, "Rotate notebook LEFT and RIGHT", 0.0
 
             remaining = max(0.0, self.phase_duration - elapsed)
-            det_status = "Locked" if nb_data.is_detected else "Searching Notebook..."
-            return False, f"[1/4] Hold notebook LEVEL: {remaining:.1f}s ({det_status})", progress
+            det_status = "✔ Locked" if nb_data.is_detected else "Searching Notebook..."
+            return False, f"[Step 1/5] Hold notebook LEVEL & NEUTRAL: {remaining:.1f}s ({det_status})", progress
 
-        # 2. Comfortable Left Tilt
-        elif self.calibration_phase == "nb_rot_left":
+        # -------------------------------------------------------------
+        # STEP B: STEERING RANGE (ROTATE LEFT AND RIGHT)
+        # -------------------------------------------------------------
+        elif self.calibration_phase == "nb_steer_range":
             if nb_data.is_detected:
-                self.left_angles.append(nb_data.rotation_angle)
-
-            if elapsed >= self.phase_duration:
-                self.calibration_phase = "nb_rot_right"
-                self.phase_start_time = time.time()
-                return False, "Rotate notebook RIGHT slightly", 0.0
-
-            remaining = max(0.0, self.phase_duration - elapsed)
-            return False, f"[2/4] Rotate notebook LEFT: {remaining:.1f}s", progress
-
-        # 3. Comfortable Right Tilt
-        elif self.calibration_phase == "nb_rot_right":
-            if nb_data.is_detected:
-                self.right_angles.append(nb_data.rotation_angle)
+                if nb_data.rotation_angle < -2.0:
+                    self.left_angles.append(nb_data.rotation_angle)
+                elif nb_data.rotation_angle > 2.0:
+                    self.right_angles.append(nb_data.rotation_angle)
 
             if elapsed >= self.phase_duration:
                 min_l = abs(min(self.left_angles)) if self.left_angles else 25.0
@@ -234,14 +257,66 @@ class CalibrationManager:
                 avg_range = max(18.0, min(55.0, (min_l + max_r) / 2.0))
                 self.config["notebook_max_steer_angle"] = round(avg_range, 1)
 
+                self.calibration_phase = "nb_brake_pitch"
+                self.phase_start_time = time.time()
+                self._clear_buffers()
+                return False, "Tilt notebook FORWARD (Brake)", 0.0
+
+            remaining = max(0.0, self.phase_duration - elapsed)
+            return False, f"[Step 2/5] Rotate notebook LEFT and RIGHT: {remaining:.1f}s", progress
+
+        # -------------------------------------------------------------
+        # STEP C: BRAKING MOVEMENT (FORWARD TILT) & DISTINGUISHABILITY
+        # -------------------------------------------------------------
+        elif self.calibration_phase == "nb_brake_pitch":
+            if nb_data.is_detected:
+                self.brake_pitches.append(nb_data.raw_pitch)
+                self.brake_heights.append(nb_data.height)
+
+            if elapsed >= self.phase_duration:
+                neutral_pitch = float(self.config.get("notebook_neutral_pitch", 0.0))
+                neutral_h = float(self.config.get("notebook_neutral_height", 100.0))
+
+                mean_pitch = float(np.mean(self.brake_pitches)) if self.brake_pitches else neutral_pitch
+                pitch_delta = abs(mean_pitch - neutral_pitch)
+
+                mean_h = float(np.mean(self.brake_heights)) if self.brake_heights else neutral_h
+                h_drop = max(0.0, 1.0 - (mean_h / max(1.0, neutral_h)))
+
+                # Check if camera can distinguish braking reliably
+                if (pitch_delta < 5.0) and (h_drop < 0.06):
+                    self.is_calibrating = False
+                    self.calibration_phase = "idle"
+                    self.calibration_warning = "⚠️ Braking movement too subtle to distinguish reliably."
+                    return False, "⚠️ Rejected: Forward tilt too subtle. Please tilt notebook forward more distinctly.", 0.0
+
+                # Set calibrated thresholds safely
+                self.config["notebook_brake_pitch_thresh"] = max(6.0, round(pitch_delta * 0.65, 1))
+                self.config["notebook_brake_height_thresh"] = max(0.06, round(h_drop * 0.60, 2))
+
+                self.calibration_phase = "nb_return_neutral"
+                self.phase_start_time = time.time()
+                self._clear_buffers()
+                return False, "Return notebook to NEUTRAL", 0.0
+
+            remaining = max(0.0, self.phase_duration - elapsed)
+            return False, f"[Step 3/5] Tilt notebook FORWARD (Brake): {remaining:.1f}s", progress
+
+        # -------------------------------------------------------------
+        # STEP D: RETURN TO NEUTRAL (VERIFY RELEASE)
+        # -------------------------------------------------------------
+        elif self.calibration_phase == "nb_return_neutral":
+            if elapsed >= self.phase_duration:
                 self.calibration_phase = "nb_right_index"
                 self.phase_start_time = time.time()
                 return False, "Raise RIGHT HAND index finger!", 0.0
 
             remaining = max(0.0, self.phase_duration - elapsed)
-            return False, f"[3/4] Rotate notebook RIGHT: {remaining:.1f}s", progress
+            return False, f"[Step 4/5] Return notebook to NEUTRAL position: {remaining:.1f}s", progress
 
-        # 4. Verify Right-Hand Raised Index Finger
+        # -------------------------------------------------------------
+        # STEP E: RIGHT INDEX FINGER RAISE & LOWER VERIFICATION (GAS)
+        # -------------------------------------------------------------
         elif self.calibration_phase == "nb_right_index":
             if hand_data.right_hand_detected and hand_data.right_index_raised:
                 self.right_index_confirmed = True
@@ -251,12 +326,12 @@ class CalibrationManager:
                 self.calibration_phase = "done"
                 self.config["notebook_steering_enabled"] = True
                 self.save()
-                idx_msg = "Right Index Verified! 🚀" if self.right_index_confirmed else "Ready (Ensure right index raised for gas)"
-                return True, f"Notebook Calibrated! {idx_msg}", 1.0
+                idx_msg = "Right Index Verified! 🚀" if self.right_index_confirmed else "Ready (Raise right index for gas)"
+                return True, f"✔ Notebook Steering & Braking Calibrated! {idx_msg}", 1.0
 
             remaining = max(0.0, self.phase_duration - elapsed)
             stat = "✔ INDEX RAISED DETECTED" if (hand_data.right_hand_detected and hand_data.right_index_raised) else "Raise right index finger"
-            return False, f"[4/4] {stat}: {remaining:.1f}s", progress
+            return False, f"[Step 5/5] {stat}: {remaining:.1f}s", progress
 
         return False, "Idle", 0.0
 
@@ -287,8 +362,13 @@ class CalibrationManager:
         self.samples_y.clear()
         self.samples_size.clear()
         self.samples_angles.clear()
+        self.samples_pitches.clear()
+        self.samples_heights.clear()
+        self.samples_widths.clear()
         self.left_angles.clear()
         self.right_angles.clear()
+        self.brake_pitches.clear()
+        self.brake_heights.clear()
 
     def update_calibration_sample(self, hand_center: Tuple[float, float], hand_size: float) -> Tuple[bool, str, float]:
         if not self.is_calibrating or self.calibration_type == "notebook_wizard":
@@ -463,3 +543,28 @@ class CalibrationManager:
         self.config["notebook_hsv_lower"] = lower
         self.config["notebook_hsv_upper"] = upper
         self.save()
+
+    @property
+    def notebook_brake_pitch_thresh(self) -> float:
+        return float(self.config.get("notebook_brake_pitch_thresh", 9.0))
+
+    def set_notebook_brake_pitch_thresh(self, val: float) -> None:
+        self.config["notebook_brake_pitch_thresh"] = max(3.0, min(30.0, val))
+        self.save()
+
+    @property
+    def notebook_brake_height_thresh(self) -> float:
+        return float(self.config.get("notebook_brake_height_thresh", 0.10))
+
+    def set_notebook_brake_height_thresh(self, val: float) -> None:
+        self.config["notebook_brake_height_thresh"] = max(0.03, min(0.35, val))
+        self.save()
+
+    @property
+    def notebook_brake_sensitivity(self) -> float:
+        return float(self.config.get("notebook_brake_sensitivity", 1.0))
+
+    def set_notebook_brake_sensitivity(self, val: float) -> None:
+        self.config["notebook_brake_sensitivity"] = max(0.2, min(3.0, val))
+        self.save()
+

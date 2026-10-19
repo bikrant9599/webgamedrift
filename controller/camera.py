@@ -65,10 +65,15 @@ class CameraThread(threading.Thread):
         self.target_fps = fps
 
         # Notebook Tracker
-        hsv_l = self.calibration.config.get("notebook_hsv_lower", [8, 65, 65])
-        hsv_u = self.calibration.config.get("notebook_hsv_upper", [32, 255, 255])
+        hsv_l = self.calibration.config.get("notebook_hsv_lower", [7, 75, 120])
+        hsv_u = self.calibration.config.get("notebook_hsv_upper", [28, 255, 255])
         self.notebook_tracker = NotebookTracker(hsv_lower=tuple(hsv_l), hsv_upper=tuple(hsv_u))
         self.notebook_tracker.neutral_angle = float(self.calibration.config.get("notebook_neutral_angle", 0.0))
+        self.notebook_tracker.neutral_pitch = float(self.calibration.config.get("notebook_neutral_pitch", 0.0))
+        self.notebook_tracker.neutral_height = float(self.calibration.config.get("notebook_neutral_height", 0.0))
+        self.notebook_tracker.neutral_width = float(self.calibration.config.get("notebook_neutral_width", 0.0))
+        self.notebook_tracker.brake_pitch_thresh = float(self.calibration.config.get("notebook_brake_pitch_thresh", 9.0))
+        self.notebook_tracker.brake_height_thresh = float(self.calibration.config.get("notebook_brake_height_thresh", 0.10))
 
         self._running = False
         self._lock = threading.Lock()
@@ -134,6 +139,11 @@ class CameraThread(threading.Thread):
                 hand_roi = (hand_data.left_hand_center, hand_data.right_hand_center)
 
             self.notebook_tracker.neutral_angle = float(self.calibration.config.get("notebook_neutral_angle", 0.0))
+            self.notebook_tracker.neutral_pitch = float(self.calibration.config.get("notebook_neutral_pitch", 0.0))
+            self.notebook_tracker.neutral_height = float(self.calibration.config.get("notebook_neutral_height", 0.0))
+            self.notebook_tracker.neutral_width = float(self.calibration.config.get("notebook_neutral_width", 0.0))
+            self.notebook_tracker.brake_pitch_thresh = float(self.calibration.config.get("notebook_brake_pitch_thresh", 9.0))
+            self.notebook_tracker.brake_height_thresh = float(self.calibration.config.get("notebook_brake_height_thresh", 0.10))
             if "notebook_hsv_lower" in self.calibration.config and "notebook_hsv_upper" in self.calibration.config:
                 self.notebook_tracker.hsv_lower = np.array(self.calibration.config["notebook_hsv_lower"], dtype=np.uint8)
                 self.notebook_tracker.hsv_upper = np.array(self.calibration.config["notebook_hsv_upper"], dtype=np.uint8)
@@ -249,18 +259,35 @@ class CameraThread(threading.Thread):
         if nb.is_detected and len(nb.corners) == 4:
             pts = np.array(nb.corners, dtype=np.int32).reshape((-1, 1, 2))
 
-            # Electric cyan-blue / orange outline
-            cv2.polylines(frame, [pts], isClosed=True, color=(0, 220, 255), thickness=3, lineType=cv2.LINE_AA)
+            # Dynamic outline color: RED if braking, CYAN if steering, GREEN if neutral
+            if nb.is_braking or state.brake:
+                outline_color = (0, 0, 255)       # Red (Braking)
+                fill_color = (0, 0, 220)
+                status_tag = f"BRAKE ACTIVE (Pitch: {nb.pitch_angle:+.1f} deg)"
+                tag_color = (0, 50, 255)
+            elif state.steer_left or state.steer_right:
+                outline_color = (0, 220, 255)     # Cyan (Steering)
+                fill_color = (0, 140, 255)
+                status_tag = f"STEER {'LEFT' if state.steer_left else 'RIGHT'} ({nb.rotation_angle:+.1f} deg)"
+                tag_color = (0, 220, 255)
+            else:
+                outline_color = (0, 255, 120)     # Emerald Green (Neutral)
+                fill_color = (0, 180, 80)
+                status_tag = f"LEVEL / NEUTRAL ({nb.rotation_angle:+.1f} deg)"
+                tag_color = (0, 255, 120)
+
+            # Draw notebook polygon outline
+            cv2.polylines(frame, [pts], isClosed=True, color=outline_color, thickness=3, lineType=cv2.LINE_AA)
 
             # Fill translucent highlight inside notebook
             overlay = frame.copy()
-            cv2.fillPoly(overlay, [pts], (0, 140, 255))
-            cv2.addWeighted(overlay, 0.12, frame, 0.88, 0, frame)
+            cv2.fillPoly(overlay, [pts], fill_color)
+            cv2.addWeighted(overlay, 0.14, frame, 0.86, 0, frame)
 
             # Draw the 4 corner points with numbered tags
             corner_labels = ["1:TL", "2:TR", "3:BR", "4:BL"]
             for i, (cx, cy) in enumerate(nb.corners):
-                cv2.circle(frame, (cx, cy), 6, (0, 255, 255), -1, cv2.LINE_AA)
+                cv2.circle(frame, (cx, cy), 6, outline_color, -1, cv2.LINE_AA)
                 cv2.circle(frame, (cx, cy), 8, (255, 255, 255), 1, cv2.LINE_AA)
                 cv2.putText(frame, corner_labels[i], (cx + 8, cy - 8),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 240, 255), 1, cv2.LINE_AA)
@@ -273,12 +300,14 @@ class CameraThread(threading.Thread):
             # Orientation Vector Line (top edge)
             tl = nb.corners[0]
             tr = nb.corners[1]
-            cv2.line(frame, tl, tr, (0, 255, 0), 2, cv2.LINE_AA)
+            cv2.line(frame, tl, tr, outline_color, 2, cv2.LINE_AA)
 
-            # Display angle tag above notebook
-            ang_txt = f"ROT: {nb.rotation_angle:+.1f} deg"
-            cv2.putText(frame, ang_txt, (ncx - 40, max(25, ncy - int(nb.height // 2) - 10)),
-                        cv2.FONT_HERSHEY_DUPLEX, 0.50, (0, 240, 255), 1, cv2.LINE_AA)
+            # Display angle & status tag above notebook
+            ang_txt = f"ROT: {nb.rotation_angle:+.1f} deg | PITCH: {nb.pitch_angle:+.1f} deg"
+            cv2.putText(frame, ang_txt, (max(10, ncx - 100), max(25, ncy - int(nb.height // 2) - 18)),
+                        cv2.FONT_HERSHEY_DUPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
+            cv2.putText(frame, status_tag, (max(10, ncx - 100), max(40, ncy - int(nb.height // 2) - 3)),
+                        cv2.FONT_HERSHEY_DUPLEX, 0.45, tag_color, 1, cv2.LINE_AA)
 
         # -------------------------------------------------------------
         # 2. HAND TRACKING OVERLAYS & SKELETON
@@ -323,21 +352,41 @@ class CameraThread(threading.Thread):
         # 3. LIVE HUD TELEMETRY CARDS
         # -------------------------------------------------------------
         # Top Left Telemetry Box
-        cv2.rectangle(frame, (10, 10), (280, 88), (15, 18, 22), -1)
-        cv2.rectangle(frame, (10, 10), (280, 88), (45, 52, 65), 1)
+        cv2.rectangle(frame, (10, 10), (320, 125), (15, 18, 22), -1)
+        cv2.rectangle(frame, (10, 10), (320, 125), (45, 52, 65), 1)
 
-        # State text
+        # Line 1: State title
         color_txt = (70, 255, 100) if state.accelerate else ((70, 70, 255) if state.brake else (255, 255, 255))
-        cv2.putText(frame, state.gesture_name, (18, 32), cv2.FONT_HERSHEY_DUPLEX, 0.46, color_txt, 1, cv2.LINE_AA)
+        cv2.putText(frame, state.gesture_name, (18, 30), cv2.FONT_HERSHEY_DUPLEX, 0.46, color_txt, 1, cv2.LINE_AA)
 
-        # Notebook status line
-        nb_status = f"Notebook: {'LOCKED (' + str(nb.aspect_ratio) + ' AR)' if nb.is_detected else 'SEARCHING'}"
-        cv2.putText(frame, nb_status, (18, 52), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 220, 255) if nb.is_detected else (180, 180, 190), 1, cv2.LINE_AA)
+        # Line 2: Notebook & Calibration status
+        cal_ok = "CALIB OK" if self.calibration.config.get("notebook_calibrated") else "UNCALIBRATED"
+        nb_status = f"Notebook: {'LOCKED' if nb.is_detected else 'SEARCHING'} | {cal_ok}"
+        cv2.putText(frame, nb_status, (18, 49), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 220, 255) if nb.is_detected else (180, 180, 190), 1, cv2.LINE_AA)
 
-        # Right index status line
-        r_idx_status = "Right Index: RAISED (GAS ACTIVE)" if hand.right_index_raised else "Right Index: LOWERED (COAST)"
-        idx_col = (0, 255, 120) if hand.right_index_raised else (150, 155, 165)
-        cv2.putText(frame, r_idx_status, (18, 72), cv2.FONT_HERSHEY_SIMPLEX, 0.38, idx_col, 1, cv2.LINE_AA)
+        # Line 3: Steering direction & angle
+        steer_dir = "LEFT" if state.steer_left else ("RIGHT" if state.steer_right else "CENTER")
+        cv2.putText(frame, f"Steering: {steer_dir} ({nb.rotation_angle:+.1f} deg, neutral: {self.notebook_tracker.neutral_angle:.1f} deg)",
+                    (18, 68), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (200, 205, 215), 1, cv2.LINE_AA)
+
+        # Line 4: Brake & Acceleration status
+        brk_lbl = "BRAKE: ACTIVE [DOWN]" if state.brake else f"Brake: Released (Pitch {nb.pitch_angle:+.1f} deg)"
+        brk_col = (50, 70, 255) if state.brake else (140, 145, 155)
+        cv2.putText(frame, brk_lbl, (18, 87), cv2.FONT_HERSHEY_SIMPLEX, 0.36, brk_col, 1, cv2.LINE_AA)
+
+        # Line 5: Right Index finger & Active Keys
+        active_keys = sorted(list(self.keyboard_ctrl.get_active_keys()))
+        keys_str = "[" + ", ".join(k.upper() for k in active_keys) + "]" if active_keys else "[NONE]"
+        gas_lbl = f"Gas: {'ACTIVE [UP]' if state.accelerate else 'COAST'} | Keys: {keys_str}"
+        gas_col = (0, 255, 120) if state.accelerate else (140, 145, 155)
+        cv2.putText(frame, gas_lbl, (18, 106), cv2.FONT_HERSHEY_SIMPLEX, 0.36, gas_col, 1, cv2.LINE_AA)
+
+        # Calibration warning banner if present
+        if self.calibration.calibration_warning:
+            cv2.rectangle(frame, (10, h - 55), (w - 10, h - 33), (20, 20, 60), -1)
+            cv2.rectangle(frame, (10, h - 55), (w - 10, h - 33), (0, 160, 255), 1)
+            cv2.putText(frame, f"NOTE: {self.calibration.calibration_warning}", (18, h - 40),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 220, 255), 1, cv2.LINE_AA)
 
         # -------------------------------------------------------------
         # 4. STEERING BAR GAUGE (BOTTOM)

@@ -20,9 +20,11 @@ Built with **CustomTkinter** for a sleek dark racing aesthetic, **OpenCV** for r
 | **Steer Left** | Rotate notebook counter-clockwise ↺ | `Left Arrow` (or `A`) | Proportional steering beyond deadzone (default 5.0°) with EMA anti-jitter smoothing. |
 | **Steer Right** | Rotate notebook clockwise ↻ | `Right Arrow` (or `D`) | Proportional steering beyond deadzone (default 5.0°) with EMA anti-jitter smoothing. |
 | **Steer Center** | Return notebook to horizontal / neutral | *Keys Released* | Automatically snaps back to center deadzone; prevents drift or accidental turns. |
+| **Brake (Forward Tilt)** | Tilt notebook forward out-of-plane 📐 | `Down Arrow` (or `S`) | **3D Pose & Foreshortening**: Distinguishes forward pitch from roll steering. Releases instantly when returned to neutral pitch. |
 | **Accelerate (Gas)** | Raise **Right-Hand Index Finger** ☝️ | `Up Arrow` (or `W`) | **Handedness-aware**: Only physical right index finger triggers gas (middle/ring/pinky curled). Left hand is ignored. |
-| **Simultaneous Drive** | Rotate notebook + Raise Right Index | `Left/Right + Up` | **Simultaneous multi-input**: Steer right/left while accelerating, or coast through corners. |
-| **Brake (Stop)** | Form a tight **Fist** ✊ | `Down Arrow` (or `S`) | **Strictly mutually exclusive**: Cuts throttle and immediately applies full brakes. |
+| **Steer + Accelerate** | Rotate notebook + Raise Right Index | `Left/Right + Up` | **Simultaneous multi-input**: Steer right/left while accelerating, or coast through corners. |
+| **Steer + Brake** | Rotate notebook + Tilt Forward | `Left/Right + Down` | **Simultaneous control**: Valid steering is preserved while braking if movements are distinguished reliably. |
+| **Brake Priority** | Tilt Forward + Right Index Raised | `Down Arrow` only | **Strict priority**: Braking always cancels acceleration; zero conflicting gas + brake inputs. |
 | **Handbrake (Drift)** | Flash **Peace / Victory** sign ✌️ | `Spacebar` | Immediate drift engagement (also supports Shaka 🤙 or Pinch 🤏). |
 | **Emergency Stop** | Press <kbd>Escape</kbd> or click Red Button | *All Keys Released* | Instantly releases all keys and halts steering inputs safely. |
 
@@ -30,12 +32,15 @@ Built with **CustomTkinter** for a sleek dark racing aesthetic, **OpenCV** for r
 
 ## 🌟 Key Features & Improvements
 
-### 1. 📓 Notebook-Based Physical Steering Wheel
+### 1. 📓 Notebook-Based Physical Steering & Forward-Tilt Braking
 - **Real-World Object Tracking**: Detects and tracks an orange (or custom colored) notebook held horizontally with both hands like a physical steering wheel.
 - **4-Corner & Outline Tracking**: Locates and renders the notebook's rectangular boundaries, 4 labeled corners (TL, TR, BR, BL), center reticle, and orientation vector.
-- **Rotation Measurement**: Calculates rotation relative to calibrated neutral angle with clockwise (steer right) and counter-clockwise (steer left) detection.
-- **Dual Visual Features**: Uses adaptive HSV color segmentation combined with geometric Canny edge/polygon contours so tracking remains robust across different lighting conditions and backgrounds.
-- **Configurable Dynamics**: Adjustable deadzone angle (1°–15°), maximum steering angle (15°–50°), and color profiles (Orange, Blue, Green, Red, Edge Adaptive).
+- **Roll Steering vs. Forward Pitch Braking**:
+  - Uses `cv2.solvePnP` with square quadrilateral geometry to estimate full 3D Euler angles (Roll for steering, Pitch for braking).
+  - Uses vertical foreshortening ($h / h_{neutral}$) and trapezoid ratio to verify physical forward tilt.
+  - Distinguishes steering (in-plane roll) from braking (out-of-plane pitch) so steering never triggers accidental braking.
+  - Dynamic visual outline: **RED** when braking, **CYAN** when steering, **EMERALD GREEN** when neutral.
+- **Configurable Dynamics**: Adjustable deadzone angle (1°–15°), maximum steering angle (15°–50°), braking pitch threshold (4°–25°), and color profiles.
 
 ### 2. ☝️ Right-Hand Index Finger Forward Acceleration
 - **Physical Handedness Detection**: Accurately distinguishes physical Right vs Left hand on mirrored selfie webcam feeds.
@@ -43,12 +48,13 @@ Built with **CustomTkinter** for a sleek dark racing aesthetic, **OpenCV** for r
 - **Anti-Twitch Debounce**: Short confirmation delay prevents false activations from momentary hand repositioning.
 - **Zero Accidental Resumption**: When tracking drops or finger is lowered, acceleration releases immediately.
 
-### 3. 🎯 Smart 4-Step Notebook Calibration Wizard
-Click **`📓 CALIBRATE NOTEBOOK WHEEL (4-STEP)`** to launch the step-by-step calibration:
-1. **[1/4] Hold Notebook Horizontal**: Locks the neutral resting angle and 4 corner bounds.
-2. **[2/4] Rotate Notebook Left**: Measures maximum comfortable left steering rotation.
-3. **[3/4] Rotate Notebook Right**: Measures maximum comfortable right steering rotation.
-4. **[4/4] Raise Right Index Finger**: Verifies that your physical right index finger is detected and ready for acceleration.
+### 3. 🎯 Guided 5-Step Notebook Calibration Wizard
+Click **`📓 CALIBRATE NOTEBOOK (5-STEP WIZARD)`** to launch the comprehensive calibration:
+1. **[Step 1/5] Hold Notebook Neutral**: Locks resting angle, 3D pitch, height, width, and corner bounds.
+2. **[Step 2/5] Rotate Left and Right**: Measures comfortable left/right steering range and sets dynamic max steer angle.
+3. **[Step 3/5] Perform Braking Movement**: Measures forward tilt pitch and height drop. **Rejects calibration** if camera cannot distinguish braking movement reliably (pitch delta < 5.0° or height drop < 6%).
+4. **[Step 4/5] Return to Neutral**: Confirms that returning the notebook to neutral resting position cleanly releases the brake.
+5. **[Step 5/5] Raise Right Index Finger**: Verifies deliberate right-hand index finger detection for gas acceleration.
 
 ### 4. 🎚️ Smooth Steering & Sensitivity Presets
 - **1-Click Presets**:

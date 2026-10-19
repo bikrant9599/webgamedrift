@@ -111,8 +111,14 @@ class GestureDetector:
         # -------------------------------------------------------------
         is_brake_raw = False
         is_handbrake_raw = False
+        is_notebook_brake = False
 
-        if hand.is_detected:
+        if use_notebook and notebook is not None and notebook.is_detected:
+            # Notebook forward tilt braking
+            if notebook.is_braking:
+                is_brake_raw = True
+                is_notebook_brake = True
+        elif hand.is_detected:
             is_brake_raw = self._check_brake(hand, brake_type)
             is_handbrake_raw = self._check_handbrake(hand, handbrake_type)
 
@@ -125,7 +131,12 @@ class GestureDetector:
             self._brake_counter += 1
         else:
             self._brake_counter = 0
-        is_brake_confirmed = (self._brake_counter >= confirm_frames)
+
+        # Notebook pitch braking has built-in hysteresis and EMA in NotebookTracker; confirm immediately
+        if is_notebook_brake:
+            is_brake_confirmed = True
+        else:
+            is_brake_confirmed = (self._brake_counter >= confirm_frames)
 
         if is_handbrake_raw:
             self._handbrake_counter += 1
@@ -162,14 +173,14 @@ class GestureDetector:
                 is_accel_candidate = True
 
         # -------------------------------------------------------------
-        # 3. RESOLVE SPEED ACTIONS (MUTUAL EXCLUSIVITY)
+        # 3. RESOLVE SPEED ACTIONS (MUTUAL EXCLUSIVITY: BRAKE OVERRIDES GAS)
         # -------------------------------------------------------------
         if is_brake_confirmed:
             state.brake = True
             state.accelerate = False
             state.handbrake = False
-            state.brake_val = 1.0
-            state.gesture_name = "BRAKE (FIST)"
+            state.brake_val = notebook.brake_deflection if (is_notebook_brake and notebook) else 1.0
+            state.gesture_name = "BRAKE (NOTEBOOK PITCH)" if is_notebook_brake else "BRAKE (FIST)"
             self._is_accel_latched = False
 
         elif is_handbrake_confirmed:
@@ -233,12 +244,21 @@ class GestureDetector:
         if use_notebook and notebook is not None and notebook.is_detected:
             rot_str = f"{notebook.rotation_angle:+.1f}°"
             gas_str = "ACCEL ON" if state.accelerate else "COAST"
-            if state.steer_left:
-                state.details = f"Notebook Left {rot_str} ({abs(state.steering_val)*100:.0f}%) | {gas_str}"
-            elif state.steer_right:
-                state.details = f"Notebook Right {rot_str} ({abs(state.steering_val)*100:.0f}%) | {gas_str}"
+            if state.brake:
+                brk_str = f"BRAKING (Pitch {notebook.pitch_angle:+.1f}°)"
+                if state.steer_left:
+                    state.details = f"{brk_str} + Steer Left {rot_str}"
+                elif state.steer_right:
+                    state.details = f"{brk_str} + Steer Right {rot_str}"
+                else:
+                    state.details = f"{brk_str} | Center"
             else:
-                state.details = f"Notebook Center {rot_str} (Deadzone) | {gas_str}"
+                if state.steer_left:
+                    state.details = f"Notebook Left {rot_str} ({abs(state.steering_val)*100:.0f}%) | {gas_str}"
+                elif state.steer_right:
+                    state.details = f"Notebook Right {rot_str} ({abs(state.steering_val)*100:.0f}%) | {gas_str}"
+                else:
+                    state.details = f"Notebook Center {rot_str} (Deadzone) | {gas_str}"
         elif state.steer_left:
             state.details = f"Steering Left ({abs(state.steering_val)*100:.0f}%)"
         elif state.steer_right:

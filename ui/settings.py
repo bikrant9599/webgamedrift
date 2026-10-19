@@ -139,6 +139,17 @@ class SettingsWindow(ctk.CTkToplevel):
         )
         self.nb_max_slider.pack(fill="x", padx=14, pady=2)
 
+        # Forward Braking Pitch Threshold slider
+        nb_brake_row = ctk.CTkFrame(nb_frame, fg_color="transparent")
+        nb_brake_row.pack(fill="x", padx=12, pady=(4, 2))
+        self.nb_brake_lbl = ctk.CTkLabel(nb_brake_row, text="Forward Tilt Braking Threshold: 9.0°", font=ctk.CTkFont(size=12), text_color=TEXT_PRIMARY)
+        self.nb_brake_lbl.pack(side="left")
+        self.nb_brake_slider = ctk.CTkSlider(
+            nb_frame, from_=4.0, to=25.0, number_of_steps=21,
+            progress_color="#FF3366", button_color="#FF3366", command=self._on_nb_brake_change
+        )
+        self.nb_brake_slider.pack(fill="x", padx=14, pady=2)
+
         # Color Profile dropdown
         nb_color_row = ctk.CTkFrame(nb_frame, fg_color="transparent")
         nb_color_row.pack(fill="x", padx=12, pady=(4, 10))
@@ -363,6 +374,10 @@ class SettingsWindow(ctk.CTkToplevel):
         self.nb_max_slider.set(nb_max)
         self.nb_max_lbl.configure(text=f"Max Steering Angle (100% Turn): {nb_max:.1f}°")
 
+        nb_brk = self.calibration.notebook_brake_pitch_thresh
+        self.nb_brake_slider.set(nb_brk)
+        self.nb_brake_lbl.configure(text=f"Forward Tilt Braking Threshold: {nb_brk:.1f}°")
+
         color_name = self.calibration.config.get("notebook_color_name", "Orange (Default)")
         if color_name in self.nb_color_menu._values:
             self.nb_color_menu.set(color_name)
@@ -421,6 +436,10 @@ class SettingsWindow(ctk.CTkToplevel):
     def _on_nb_max_change(self, val: float):
         self.calibration.set_notebook_max_steer_angle(val)
         self.nb_max_lbl.configure(text=f"Max Steering Angle (100% Turn): {val:.1f}°")
+
+    def _on_nb_brake_change(self, val: float):
+        self.calibration.set_notebook_brake_pitch_thresh(val)
+        self.nb_brake_lbl.configure(text=f"Forward Tilt Braking Threshold: {val:.1f}°")
 
     def _on_nb_color_change(self, val: str):
         self.calibration.set_notebook_color_profile(val)

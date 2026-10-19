@@ -491,6 +491,106 @@ class TestCombinedSteeringAndAcceleration(unittest.TestCase):
         self.assertEqual(state.steering_val, 0.0)
         self.assertTrue(state.accelerate)
 
+    def test_notebook_forward_tilt_braking(self):
+        # Notebook tilted forward into braking zone
+        nb = NotebookData(
+            is_detected=True,
+            rotation_angle=0.0,
+            pitch_angle=16.0,
+            is_braking=True,
+            brake_deflection=0.85,
+            center=(320, 240)
+        )
+        hand = HandData(is_detected=True)
+        state = self.detector.evaluate(hand, notebook_data=nb)
+        self.assertTrue(state.brake)
+        self.assertFalse(state.accelerate)
+        self.assertAlmostEqual(state.brake_val, 0.85, places=2)
+        self.assertIn("BRAKE", state.gesture_name)
+
+    def test_notebook_braking_overrides_acceleration(self):
+        # User raises right index finger for gas BUT also tilts notebook forward to brake
+        nb = NotebookData(
+            is_detected=True,
+            rotation_angle=0.0,
+            pitch_angle=18.0,
+            is_braking=True,
+            brake_deflection=1.0,
+            center=(320, 240)
+        )
+        hand = HandData(
+            is_detected=True,
+            right_hand_detected=True,
+            right_index_raised=True,
+            hand_center=(0.7, 0.5)
+        )
+        state = self.detector.evaluate(hand, notebook_data=nb)
+        # Priority rule: Braking strictly overrides acceleration
+        self.assertTrue(state.brake)
+        self.assertFalse(state.accelerate)
+        self.assertEqual(state.throttle_val, 0.0)
+
+    def test_steer_left_while_braking(self):
+        # Notebook rotated CCW (-22 deg) AND tilted forward to brake
+        nb = NotebookData(
+            is_detected=True,
+            rotation_angle=-22.0,
+            pitch_angle=15.0,
+            is_braking=True,
+            brake_deflection=0.75,
+            center=(320, 240)
+        )
+        hand = HandData(is_detected=True)
+        state = self.detector.evaluate(hand, notebook_data=nb)
+        self.assertTrue(state.brake)
+        self.assertTrue(state.steer_left)
+        self.assertFalse(state.steer_right)
+        self.assertFalse(state.accelerate)
+        self.assertLess(state.steering_val, 0.0)
+
+    def test_steer_right_while_braking(self):
+        # Notebook rotated CW (+22 deg) AND tilted forward to brake
+        nb = NotebookData(
+            is_detected=True,
+            rotation_angle=22.0,
+            pitch_angle=15.0,
+            is_braking=True,
+            brake_deflection=0.75,
+            center=(320, 240)
+        )
+        hand = HandData(is_detected=True)
+        state = self.detector.evaluate(hand, notebook_data=nb)
+        self.assertTrue(state.brake)
+        self.assertTrue(state.steer_right)
+        self.assertFalse(state.steer_left)
+        self.assertFalse(state.accelerate)
+        self.assertGreater(state.steering_val, 0.0)
+
+    def test_brake_release_when_returning_to_neutral(self):
+        # First brake
+        nb_brake = NotebookData(
+            is_detected=True,
+            pitch_angle=16.0,
+            is_braking=True,
+            brake_deflection=0.8,
+            center=(320, 240)
+        )
+        hand = HandData(is_detected=True)
+        state1 = self.detector.evaluate(hand, notebook_data=nb_brake)
+        self.assertTrue(state1.brake)
+
+        # Return to neutral pitch
+        nb_neutral = NotebookData(
+            is_detected=True,
+            pitch_angle=1.0,
+            is_braking=False,
+            brake_deflection=0.0,
+            center=(320, 240)
+        )
+        state2 = self.detector.evaluate(hand, notebook_data=nb_neutral)
+        self.assertFalse(state2.brake)
+        self.assertEqual(state2.brake_val, 0.0)
+
     def test_tracking_loss_releases_all_inputs(self):
         # Notebook and hand not detected
         nb = NotebookData(is_detected=False)
@@ -499,6 +599,7 @@ class TestCombinedSteeringAndAcceleration(unittest.TestCase):
         self.assertFalse(state.steer_left)
         self.assertFalse(state.steer_right)
         self.assertFalse(state.accelerate)
+        self.assertFalse(state.brake)
         self.assertEqual(state.steering_val, 0.0)
 
 
@@ -515,46 +616,91 @@ class TestNotebookCalibrationWizard(unittest.TestCase):
             except Exception:
                 pass
 
-    def test_full_notebook_wizard_workflow(self):
+    def test_full_5_step_notebook_wizard_workflow(self):
         self.calib.start_notebook_calibration()
         self.assertTrue(self.calib.is_calibrating)
         self.assertEqual(self.calib.calibration_phase, "nb_neutral")
 
-        # Phase 1: Neutral (hold at 0.5 deg)
-        nb = NotebookData(is_detected=True, rotation_angle=0.5, center=(320, 240))
+        # Step 1: Hold neutral position (0.5 deg roll, 2.0 deg pitch, height=180, width=280)
+        nb_neutral = NotebookData(
+            is_detected=True, raw_angle=0.5, raw_pitch=2.0, height=180.0, width=280.0, center=(320, 240)
+        )
         hand = HandData(is_detected=True)
-        self.calib.update_notebook_calibration(nb, hand)
+        self.calib.update_notebook_calibration(nb_neutral, hand)
         time.sleep(0.015)
-        done, msg, prog = self.calib.update_notebook_calibration(nb, hand)
+        done, msg, prog = self.calib.update_notebook_calibration(nb_neutral, hand)
         self.assertFalse(done)
-        self.assertEqual(self.calib.calibration_phase, "nb_rot_left")
+        self.assertEqual(self.calib.calibration_phase, "nb_steer_range")
+        self.assertAlmostEqual(self.calib.config["notebook_neutral_angle"], 0.5, delta=0.5)
 
-        # Phase 2: Rotate Left (-25 deg)
-        nb_left = NotebookData(is_detected=True, rotation_angle=-25.0, center=(320, 240))
-        self.calib.update_notebook_calibration(nb_left, hand)
+        # Step 2: Rotate Left and Right
+        nb_l = NotebookData(is_detected=True, rotation_angle=-26.0, raw_pitch=2.0, height=180.0, width=280.0)
+        nb_r = NotebookData(is_detected=True, rotation_angle=28.0, raw_pitch=2.0, height=180.0, width=280.0)
+        self.calib.update_notebook_calibration(nb_l, hand)
+        self.calib.update_notebook_calibration(nb_r, hand)
         time.sleep(0.015)
-        done, msg, prog = self.calib.update_notebook_calibration(nb_left, hand)
+        done, msg, prog = self.calib.update_notebook_calibration(nb_r, hand)
         self.assertFalse(done)
-        self.assertEqual(self.calib.calibration_phase, "nb_rot_right")
+        self.assertEqual(self.calib.calibration_phase, "nb_brake_pitch")
 
-        # Phase 3: Rotate Right (+25 deg)
-        nb_right = NotebookData(is_detected=True, rotation_angle=25.0, center=(320, 240))
-        self.calib.update_notebook_calibration(nb_right, hand)
+        # Step 3: Perform intended braking movement (Forward tilt: pitch=20.0 deg, height=140.0)
+        nb_tilt = NotebookData(
+            is_detected=True, rotation_angle=0.0, raw_pitch=20.0, height=140.0, width=280.0
+        )
+        self.calib.update_notebook_calibration(nb_tilt, hand)
         time.sleep(0.015)
-        done, msg, prog = self.calib.update_notebook_calibration(nb_right, hand)
+        done, msg, prog = self.calib.update_notebook_calibration(nb_tilt, hand)
+        self.assertFalse(done)
+        self.assertEqual(self.calib.calibration_phase, "nb_return_neutral")
+        self.assertGreater(self.calib.config["notebook_brake_pitch_thresh"], 5.0)
+
+        # Step 4: Return notebook to neutral position
+        self.calib.update_notebook_calibration(nb_neutral, hand)
+        time.sleep(0.015)
+        done, msg, prog = self.calib.update_notebook_calibration(nb_neutral, hand)
         self.assertFalse(done)
         self.assertEqual(self.calib.calibration_phase, "nb_right_index")
 
-        # Phase 4: Right index finger raised
+        # Step 5: Raise right index finger (acceleration verification)
         hand_idx = HandData(is_detected=True, right_hand_detected=True, right_index_raised=True)
-        self.calib.update_notebook_calibration(nb, hand_idx)
+        self.calib.update_notebook_calibration(nb_neutral, hand_idx)
         time.sleep(0.015)
-        done, msg, prog = self.calib.update_notebook_calibration(nb, hand_idx)
+        done, msg, prog = self.calib.update_notebook_calibration(nb_neutral, hand_idx)
         self.assertTrue(done)
         self.assertEqual(self.calib.calibration_phase, "done")
         self.assertTrue(self.calib.config.get("notebook_calibrated"))
         self.assertTrue(self.calib.notebook_steering_enabled)
 
+    def test_rejection_when_braking_movement_is_too_subtle(self):
+        self.calib.start_notebook_calibration()
+
+        # Step 1: Neutral
+        nb_neutral = NotebookData(is_detected=True, raw_angle=0.0, raw_pitch=0.0, height=180.0, width=280.0)
+        hand = HandData(is_detected=True)
+        self.calib.update_notebook_calibration(nb_neutral, hand)
+        time.sleep(0.015)
+        self.calib.update_notebook_calibration(nb_neutral, hand)
+        self.assertEqual(self.calib.calibration_phase, "nb_steer_range")
+
+        # Step 2: Range
+        time.sleep(0.015)
+        self.calib.update_notebook_calibration(nb_neutral, hand)
+        self.assertEqual(self.calib.calibration_phase, "nb_brake_pitch")
+
+        # Step 3: Braking movement that is too subtle (pitch delta = 1.0 deg < 5.0 deg, height drop = 0)
+        nb_subtle = NotebookData(is_detected=True, raw_angle=0.0, raw_pitch=1.0, height=178.0, width=280.0)
+        self.calib.update_notebook_calibration(nb_subtle, hand)
+        time.sleep(0.015)
+        done, msg, prog = self.calib.update_notebook_calibration(nb_subtle, hand)
+
+        # Must reject calibration with a clear warning
+        self.assertFalse(done)
+        self.assertFalse(self.calib.is_calibrating)
+        self.assertEqual(self.calib.calibration_phase, "idle")
+        self.assertIn("Rejected", msg)
+        self.assertIsNotNone(self.calib.calibration_warning)
+
 
 if __name__ == "__main__":
     unittest.main()
+
