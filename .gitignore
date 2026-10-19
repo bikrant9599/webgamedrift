@@ -41,4 +41,5 @@ burnout_camera_drive.log
 .idea/
 *.swp
 Thumbs.db
-test_calib_temp.json
+test_*.json
+session_history.json

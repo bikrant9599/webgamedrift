@@ -8,6 +8,8 @@ Includes strict safety mechanisms:
 - Active key tracking (no stuck keys)
 - Idempotent press/release (no repeated down events)
 - Immediate release_all on stop, hand loss, emergency stop, or window blur
+- Practice Mode: visual gesture telemetry without sending keys to Windows
+- Manual Re-Arm Safety: never automatically resumes throttle after tracking loss
 - Thread-safe operations
 """
 
@@ -39,7 +41,6 @@ SCAN_CODES = {
     "ctrl": (0x1D, False),
 }
 
-# Windows API constants and ctypes structures
 IS_WINDOWS = sys.platform.startswith("win")
 if IS_WINDOWS:
     import ctypes
@@ -95,8 +96,6 @@ if IS_WINDOWS:
 else:
     user32 = None
 
-
-# Fallback to pyautogui or pydirectinput if needed
 pyautogui_available = False
 try:
     import pyautogui
@@ -134,7 +133,8 @@ def get_foreground_window_title() -> str:
 
 class KeyboardController:
     """
-    Manages safe keyboard inputs with tracking and emergency controls.
+    Manages safe keyboard inputs with tracking, emergency controls, practice mode,
+    and manual re-arm protection.
     """
 
     def __init__(self):
@@ -142,6 +142,15 @@ class KeyboardController:
         self._active_keys: Set[str] = set()
         self._is_enabled = False
         self._emergency_stopped = False
+
+        # Safety: Interruption & Re-Arm State
+        self.require_manual_resume = True
+        self.is_interrupted = False
+        self.interruption_reason = ""
+
+        # Practice Mode: Simulates inputs for UI badges without sending real keys to OS
+        self.practice_mode = False
+
         self._key_mapping: Dict[str, str] = {
             "steer_left": "left",
             "steer_right": "right",
@@ -153,7 +162,7 @@ class KeyboardController:
         self.allowed_focus_keywords = ["Burnout", "Poki", "Chrome", "Edge", "Firefox", "Opera", "Brave"]
 
     def set_mapping(self, mapping: Dict[str, str]) -> None:
-        """Update action-to-key mapping (e.g. {'steer_left': 'a', ...})."""
+        """Update action-to-key mapping."""
         with self._lock:
             self.release_all_internal()
             self._key_mapping.update(mapping)
@@ -163,7 +172,8 @@ class KeyboardController:
             return dict(self._key_mapping)
 
     def is_enabled(self) -> bool:
-        return self._is_enabled and not self._emergency_stopped
+        """Controller is active if enabled, not emergency stopped, and not waiting for rearm."""
+        return self._is_enabled and not self._emergency_stopped and not self.is_interrupted
 
     def set_enabled(self, enabled: bool) -> None:
         """Enable or disable driving input sending."""
@@ -172,14 +182,45 @@ class KeyboardController:
                 self.release_all_internal()
             if enabled:
                 self._emergency_stopped = False
+                self.is_interrupted = False
+                self.interruption_reason = ""
             self._is_enabled = enabled
         logger.info(f"KeyboardController enabled state: {self._is_enabled}")
 
+    def set_practice_mode(self, practice: bool) -> None:
+        """Toggle practice mode (inputs tracked visually, but no real keys sent)."""
+        with self._lock:
+            self.release_all_internal()
+            self.practice_mode = practice
+        logger.info(f"KeyboardController practice mode: {self.practice_mode}")
+
+    def notify_tracking_interrupted(self, reason: str = "Tracking lost") -> None:
+        """
+        Called when hand tracking drops or camera fails during active driving.
+        Immediately releases all keys and, if require_manual_resume is set,
+        locks inputs until user manually resumes.
+        """
+        with self._lock:
+            self.release_all_internal()
+            if self._is_enabled and self.require_manual_resume:
+                self.is_interrupted = True
+                self.interruption_reason = reason
+                logger.warning(f"Driving interrupted: {reason}. Manual resume required.")
+
+    def rearm_driving(self) -> None:
+        """Manually re-arm driving after an interruption."""
+        with self._lock:
+            self.is_interrupted = False
+            self.interruption_reason = ""
+            self.release_all_internal()
+        logger.info("Driving re-armed by user.")
+
     def emergency_stop(self) -> None:
-        """Immediately release all keys and disable inputs until restarted."""
+        """Immediately release all keys and lock inputs until explicitly restarted."""
         with self._lock:
             self._emergency_stopped = True
             self._is_enabled = False
+            self.is_interrupted = False
             self.release_all_internal()
         logger.warning("EMERGENCY STOP TRIGGERED: All keys released and inputs locked.")
 
@@ -195,6 +236,9 @@ class KeyboardController:
 
     def _send_win_key(self, scan_code: int, extended: bool, is_down: bool) -> bool:
         """Send DirectInput scancode via ctypes SendInput."""
+        if self.practice_mode:
+            return True  # Practice mode: suppress actual OS key injection
+
         if not IS_WINDOWS or not user32:
             return False
         try:
@@ -215,13 +259,15 @@ class KeyboardController:
             return False
 
     def _raw_press(self, key_name: str) -> None:
+        if self.practice_mode:
+            return
+
         key_name = key_name.lower().strip()
         if key_name in SCAN_CODES:
             code, ext = SCAN_CODES[key_name]
             if self._send_win_key(code, ext, is_down=True):
                 return
 
-        # Fallback to pydirectinput
         if pydirectinput_available:
             try:
                 pydirectinput.keyDown(key_name)
@@ -229,7 +275,6 @@ class KeyboardController:
             except Exception:
                 pass
 
-        # Fallback to pyautogui
         if pyautogui_available:
             try:
                 pyautogui.keyDown(key_name)
@@ -237,13 +282,15 @@ class KeyboardController:
                 logger.error(f"pyautogui keyDown failed for {key_name}: {e}")
 
     def _raw_release(self, key_name: str) -> None:
+        if self.practice_mode:
+            return
+
         key_name = key_name.lower().strip()
         if key_name in SCAN_CODES:
             code, ext = SCAN_CODES[key_name]
             if self._send_win_key(code, ext, is_down=False):
                 return
 
-        # Fallback to pydirectinput
         if pydirectinput_available:
             try:
                 pydirectinput.keyUp(key_name)
@@ -251,7 +298,6 @@ class KeyboardController:
             except Exception:
                 pass
 
-        # Fallback to pyautogui
         if pyautogui_available:
             try:
                 pyautogui.keyUp(key_name)
@@ -259,7 +305,7 @@ class KeyboardController:
                 logger.error(f"pyautogui keyUp failed for {key_name}: {e}")
 
     def release_all_internal(self) -> None:
-        """Internal helper to release all active keys without extra locking."""
+        """Internal helper to release all active keys."""
         if not self._active_keys:
             return
         keys_to_release = list(self._active_keys)
@@ -286,18 +332,11 @@ class KeyboardController:
 
     def apply_actions(self, desired_actions: Dict[str, bool]) -> None:
         """
-        Takes a dict of desired actions, e.g.:
-        {
-            'steer_left': False,
-            'steer_right': True,
-            'accelerate': True,
-            'brake': False,
-            'handbrake': False
-        }
-        Applies changes smoothly and safely.
+        Takes desired actions, applies safety filters, and handles press/release.
+        In practice mode, updates active_keys set for UI feedback without emitting OS keys.
         """
         with self._lock:
-            if not self._is_enabled or self._emergency_stopped:
+            if not self._is_enabled or self._emergency_stopped or self.is_interrupted:
                 self.release_all_internal()
                 return
 
@@ -305,35 +344,33 @@ class KeyboardController:
                 self.release_all_internal()
                 return
 
-            # Determine which keys should currently be pressed
+            # Determine desired keys
             desired_keys: Set[str] = set()
             for action_name, is_active in desired_actions.items():
                 if is_active and action_name in self._key_mapping:
                     key = self._key_mapping[action_name].lower().strip()
                     desired_keys.add(key)
 
-            # Mutual exclusivity safety check:
-            # Cannot have both accelerate and brake active simultaneously
+            # Mutual exclusivity: Braking strictly overrides acceleration
             accel_key = self._key_mapping.get("accelerate", "up").lower()
             brake_key = self._key_mapping.get("brake", "down").lower()
             if accel_key in desired_keys and brake_key in desired_keys:
-                # Braking takes priority over acceleration for safety
                 desired_keys.remove(accel_key)
 
-            # Steer left and steer right cannot be both active
+            # Left and Right cannot both be pressed
             left_key = self._key_mapping.get("steer_left", "left").lower()
             right_key = self._key_mapping.get("steer_right", "right").lower()
             if left_key in desired_keys and right_key in desired_keys:
                 desired_keys.remove(left_key)
                 desired_keys.remove(right_key)
 
-            # Keys to release: currently active but not in desired
+            # Release keys no longer desired
             keys_to_release = self._active_keys - desired_keys
             for key in keys_to_release:
                 self._raw_release(key)
                 self._active_keys.remove(key)
 
-            # Keys to press: in desired but not currently active
+            # Press newly desired keys
             keys_to_press = desired_keys - self._active_keys
             for key in keys_to_press:
                 self._raw_press(key)

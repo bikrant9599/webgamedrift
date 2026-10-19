@@ -1,11 +1,13 @@
 """
 Unit and integration tests for Burnout Camera Drive.
-Tests keyboard controller safety, gesture detector state machine, and calibration logic.
+Tests keyboard controller safety, gesture detector state machine,
+smart calibration, presets, two-hand virtual wheel, practice mode, and session stats.
 """
 
 import sys
 import os
 import unittest
+import time
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -13,14 +15,14 @@ if PROJECT_ROOT not in sys.path:
 
 from controller.keyboard_control import KeyboardController
 from controller.hand_tracking import HandData
-from controller.calibration import CalibrationManager
+from controller.calibration import CalibrationManager, PRESETS
 from controller.gesture_detection import GestureDetector, DrivingState
+from controller.session_stats import SessionTracker
 
 
-class TestKeyboardSafety(unittest.TestCase):
+class TestKeyboardSafetyAndPracticeMode(unittest.TestCase):
     def setUp(self):
         self.kb = KeyboardController()
-        # Ensure disabled during testing so no real keys are held
         self.kb.set_enabled(False)
 
     def tearDown(self):
@@ -34,14 +36,45 @@ class TestKeyboardSafety(unittest.TestCase):
         self.assertEqual(mapping["brake"], "down")
         self.assertEqual(mapping["handbrake"], "space")
 
-    def test_active_keys_tracking_when_disabled(self):
-        # When controller is disabled, applying actions should result in 0 active keys
-        self.kb.apply_actions({"accelerate": True, "steer_left": True})
+    def test_practice_mode_suppresses_real_keys(self):
+        self.kb.set_practice_mode(True)
+        self.kb.set_enabled(True)
+
+        sent_keys = []
+        self.kb._send_win_key = lambda code, ext, down: sent_keys.append((code, down))
+
+        self.kb.apply_actions({"accelerate": True})
+        # Practice mode suppresses OS key sending
+        self.assertEqual(len(sent_keys), 0)
+        # But active_keys is tracked for UI HUD badges
+        self.assertIn("up", self.kb.get_active_keys())
+
+    def test_manual_rearm_after_tracking_interruption(self):
+        self.kb.set_enabled(True)
+        self.kb.require_manual_resume = True
+
+        # Simulate driving
+        self.kb.apply_actions({"accelerate": True})
+        self.assertIn("up", self.kb.get_active_keys())
+
+        # Tracking interrupted
+        self.kb.notify_tracking_interrupted("Hand lost")
+        # All keys must be instantly released
         self.assertEqual(len(self.kb.get_active_keys()), 0)
+        self.assertTrue(self.kb.is_interrupted)
+
+        # Applying actions while interrupted must NOT press keys
+        self.kb.apply_actions({"accelerate": True})
+        self.assertEqual(len(self.kb.get_active_keys()), 0)
+
+        # Manually re-arm
+        self.kb.rearm_driving()
+        self.assertFalse(self.kb.is_interrupted)
+        self.kb.apply_actions({"accelerate": True})
+        self.assertIn("up", self.kb.get_active_keys())
 
     def test_emergency_stop_clears_keys(self):
         self.kb.set_enabled(True)
-        # Directly simulate active key
         self.kb._active_keys.add("up")
         self.kb._active_keys.add("left")
         self.kb.emergency_stop()
@@ -50,138 +83,181 @@ class TestKeyboardSafety(unittest.TestCase):
 
     def test_mutual_exclusivity(self):
         self.kb.set_enabled(True)
-        # Mock raw press and release to avoid system key injection during headless tests
-        press_log = []
-        release_log = []
-        self.kb._raw_press = lambda k: press_log.append(k)
-        self.kb._raw_release = lambda k: release_log.append(k)
+        self.kb._raw_press = lambda k: None
+        self.kb._raw_release = lambda k: None
 
-        # Both accelerate and brake requested simultaneously
         self.kb.apply_actions({"accelerate": True, "brake": True})
         active = self.kb.get_active_keys()
-
-        # Brake must take priority over accelerate!
         self.assertIn("down", active)
         self.assertNotIn("up", active)
 
 
-class TestGestureDetection(unittest.TestCase):
+class TestSmartCalibrationAndPresets(unittest.TestCase):
     def setUp(self):
-        self.calib = CalibrationManager()
+        self.test_cfg = "test_calib_smart.json"
+        self.calib = CalibrationManager(filepath=self.test_cfg)
+
+    def tearDown(self):
+        if os.path.exists(self.test_cfg):
+            try:
+                os.remove(self.test_cfg)
+            except Exception:
+                pass
+
+    def test_presets_application(self):
+        self.assertTrue(self.calib.apply_preset("beginner"))
+        self.assertEqual(self.calib.steering_sensitivity, PRESETS["beginner"]["steering_sensitivity"])
+        self.assertEqual(self.calib.deadzone_x, PRESETS["beginner"]["deadzone_x"])
+
+        self.assertTrue(self.calib.apply_preset("pro"))
+        self.assertEqual(self.calib.steering_sensitivity, PRESETS["pro"]["steering_sensitivity"])
+        self.assertEqual(self.calib.deadzone_x, PRESETS["pro"]["deadzone_x"])
+
+    def test_validation_and_reset(self):
+        # Valid config
+        is_v, _ = self.calib.validate_config({"steering_sensitivity": 1.2, "deadzone_x": 0.08, "neutral_x": 0.5})
+        self.assertTrue(is_v)
+
+        # Invalid config
+        is_v, _ = self.calib.validate_config({"steering_sensitivity": -1.0})
+        self.assertFalse(is_v)
+
+        # Reset to defaults
+        self.calib.reset_to_defaults()
+        self.assertEqual(self.calib.steering_sensitivity, 1.0)
+        self.assertEqual(self.calib.deadzone_x, 0.08)
+
+    def test_guided_calibration_phases(self):
+        self.calib.phase_duration = 0.01
+        self.calib.start_guided_calibration()
+
+        # Step 1: Neutral
+        self.calib.update_calibration_sample((0.50, 0.50), 0.20)
+        time.sleep(0.015)
+        done, msg, prog = self.calib.update_calibration_sample((0.50, 0.50), 0.20)
+        self.assertFalse(done)
+        self.assertEqual(self.calib.calibration_phase, "sample_left")
+
+        # Step 2: Left range
+        time.sleep(0.015)
+        done, msg, prog = self.calib.update_calibration_sample((0.28, 0.50), 0.20)
+        self.assertFalse(done)
+        self.assertEqual(self.calib.calibration_phase, "sample_right")
+
+        # Step 3: Right range
+        time.sleep(0.015)
+        done, msg, prog = self.calib.update_calibration_sample((0.72, 0.50), 0.20)
+        self.assertTrue(done)
+        self.assertEqual(self.calib.calibration_phase, "done")
+        self.assertAlmostEqual(self.calib.comfortable_range_x, 0.22, places=2)
+
+
+class TestTwoHandVirtualWheelAndGestures(unittest.TestCase):
+    def setUp(self):
+        self.calib = CalibrationManager(filepath="test_temp_wheel.json")
         self.calib.config["neutral_x"] = 0.50
         self.calib.config["deadzone_x"] = 0.08
-        self.calib.config["steering_sensitivity"] = 1.0
+        self.calib.config["deadzone_angle"] = 12.0
+        self.calib.config["gesture_confirm_frames"] = 2
         self.detector = GestureDetector(self.calib)
 
-    def test_no_hand_releases_all(self):
-        hand = HandData(is_detected=False)
+    def tearDown(self):
+        if os.path.exists("test_temp_wheel.json"):
+            try:
+                os.remove("test_temp_wheel.json")
+            except Exception:
+                pass
+
+    def test_two_hand_steering_wheel_rotation(self):
+        # Two hands: Left hand at (0.35, 0.60), Right hand at (0.65, 0.40) -> Right hand is higher -> turning LEFT
+        hand = HandData(
+            is_detected=True,
+            is_two_handed=True,
+            left_hand_center=(0.35, 0.60),
+            right_hand_center=(0.65, 0.40),
+            wheel_angle=-25.0,  # rotated left > deadzone 12 deg
+            fingers_extended=[True, True, True, True, True],
+            hand_size=0.20
+        )
         state = self.detector.evaluate(hand)
-        self.assertFalse(state.accelerate)
-        self.assertFalse(state.brake)
+        self.assertTrue(state.steer_left)
+        self.assertFalse(state.steer_right)
+        self.assertLess(state.steering_val, 0.0)
+
+    def test_two_hand_deadzone_return_to_center(self):
+        # Hands level: angle = 3 deg < deadzone 12 deg
+        hand = HandData(
+            is_detected=True,
+            is_two_handed=True,
+            left_hand_center=(0.35, 0.50),
+            right_hand_center=(0.65, 0.51),
+            wheel_angle=3.0,
+            fingers_extended=[True, True, True, True, True],
+            hand_size=0.20
+        )
+        state = self.detector.evaluate(hand)
         self.assertFalse(state.steer_left)
         self.assertFalse(state.steer_right)
-        self.assertFalse(state.handbrake)
-        self.assertEqual(state.gesture_name, "NO HAND")
+        self.assertEqual(state.steering_val, 0.0)
 
-    def test_fist_triggers_brake(self):
-        # All fingers curled = fist
+    def test_single_hand_fallback_in_wheel_mode(self):
+        # Only 1 hand visible in wheel mode -> fallback engages smoothly
         hand = HandData(
             is_detected=True,
-            fingers_extended=[False, False, False, False, False],
-            hand_center=(0.50, 0.55),
+            is_two_handed=False,
+            is_fallback=True,
+            hand_center=(0.30, 0.50), # displaced left
+            tilt_angle=-20.0,
+            fingers_extended=[True, True, True, True, True],
             hand_size=0.20
         )
-        # Run 2 frames to clear debouncer
-        self.detector.evaluate(hand)
         state = self.detector.evaluate(hand)
+        self.assertTrue(state.is_fallback)
+        self.assertTrue(state.steer_left)
 
-        self.assertTrue(state.brake)
-        self.assertFalse(state.accelerate)
-        self.assertIn("BRAKE", state.gesture_name)
-
-    def test_peace_sign_triggers_handbrake(self):
-        # Index & Middle extended, Ring & Pinky curled
+    def test_configurable_handbrake_gestures(self):
+        # Shaka gesture: Thumb & Pinky extended, middle three curled
+        self.calib.config["handbrake_type"] = "shaka"
         hand = HandData(
             is_detected=True,
-            fingers_extended=[False, True, True, False, False],
-            hand_center=(0.50, 0.55),
+            fingers_extended=[True, False, False, False, True],
+            hand_center=(0.50, 0.50),
             hand_size=0.20
         )
+        # Needs 2 frames for confirmation
         self.detector.evaluate(hand)
         state = self.detector.evaluate(hand)
-
         self.assertTrue(state.handbrake)
-        self.assertFalse(state.accelerate)
-        self.assertIn("HANDBRAKE", state.gesture_name)
-
-    def test_forward_push_triggers_acceleration(self):
-        # Open hand pushed closer: hand size 0.26 vs neutral 0.20 (+30%)
-        hand = HandData(
-            is_detected=True,
-            fingers_extended=[True, True, True, True, True],
-            hand_center=(0.50, 0.55),
-            hand_size=0.26
-        )
-        state = self.detector.evaluate(hand)
-        self.assertTrue(state.accelerate)
-        self.assertFalse(state.brake)
-        self.assertIn("ACCELERATING", state.gesture_name)
-
-    def test_steering_deadzone_and_direction(self):
-        # 1. Inside deadzone (0.50 neutral, position 0.52 -> dx = +0.02 < deadzone 0.08)
-        hand_neutral = HandData(
-            is_detected=True,
-            fingers_extended=[True, True, True, True, True],
-            hand_center=(0.52, 0.55),
-            hand_size=0.20
-        )
-        s_neutral = self.detector.evaluate(hand_neutral)
-        self.assertFalse(s_neutral.steer_left)
-        self.assertFalse(s_neutral.steer_right)
-        self.assertEqual(s_neutral.steering_val, 0.0)
-
-        # 2. Steer Left (X = 0.35, dx = -0.15 < -deadzone 0.08)
-        hand_left = HandData(
-            is_detected=True,
-            fingers_extended=[True, True, True, True, True],
-            hand_center=(0.35, 0.55),
-            hand_size=0.20
-        )
-        s_left = self.detector.evaluate(hand_left)
-        self.assertTrue(s_left.steer_left)
-        self.assertFalse(s_left.steer_right)
-        self.assertLess(s_left.steering_val, 0.0)
-
-        # 3. Steer Right (X = 0.68, dx = +0.18 > +deadzone 0.08)
-        hand_right = HandData(
-            is_detected=True,
-            fingers_extended=[True, True, True, True, True],
-            hand_center=(0.68, 0.55),
-            hand_size=0.20
-        )
-        s_right = self.detector.evaluate(hand_right)
-        self.assertFalse(s_right.steer_left)
-        self.assertTrue(s_right.steer_right)
-        self.assertGreater(s_right.steering_val, 0.0)
 
 
-class TestCalibration(unittest.TestCase):
-    def test_calibration_routine(self):
-        calib = CalibrationManager(filepath="test_calib_temp.json")
-        calib.phase_duration = 0.01  # fast test
-        calib.start_quick_calibration()
+class TestSessionStatistics(unittest.TestCase):
+    def setUp(self):
+        self.hist_file = "test_sess_hist.json"
+        self.tracker = SessionTracker(history_file=self.hist_file)
 
-        done, msg, prog = calib.update_calibration_sample((0.48, 0.52), 0.22)
-        import time
-        time.sleep(0.02)
-        done, msg, prog = calib.update_calibration_sample((0.48, 0.52), 0.22)
+    def tearDown(self):
+        if os.path.exists(self.hist_file):
+            try:
+                os.remove(self.hist_file)
+            except Exception:
+                pass
 
-        self.assertTrue(done)
-        self.assertAlmostEqual(calib.neutral_x, 0.48, places=2)
-        self.assertTrue(calib.config["is_calibrated"])
+    def test_session_lifecycle_and_interruptions(self):
+        self.tracker.start_session(mode="live")
+        self.assertTrue(self.tracker.is_session_active)
 
-        if os.path.exists("test_calib_temp.json"):
-            os.remove("test_calib_temp.json")
+        # Simulate tracking drop during driving
+        self.tracker.record_tracking_status(True, is_driving=True)
+        self.tracker.record_tracking_status(False, is_driving=True)
+        self.assertEqual(self.tracker.interruption_count, 1)
+
+        summary = self.tracker.end_session()
+        self.assertIsNotNone(summary)
+        self.assertEqual(summary["interruptions"], 1)
+
+        # Verify history file loaded correctly
+        loaded = self.tracker.load_history()
+        self.assertEqual(len(loaded), 1)
 
 
 if __name__ == "__main__":
