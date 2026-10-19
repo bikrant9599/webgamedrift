@@ -15,9 +15,12 @@ if PROJECT_ROOT not in sys.path:
 
 from controller.keyboard_control import KeyboardController
 from controller.hand_tracking import HandData
+from controller.notebook_tracking import NotebookTracker, NotebookData
 from controller.calibration import CalibrationManager, PRESETS
 from controller.gesture_detection import GestureDetector, DrivingState
 from controller.session_stats import SessionTracker
+import cv2
+import numpy as np
 
 
 class TestKeyboardSafetyAndPracticeMode(unittest.TestCase):
@@ -258,6 +261,299 @@ class TestSessionStatistics(unittest.TestCase):
         # Verify history file loaded correctly
         loaded = self.tracker.load_history()
         self.assertEqual(len(loaded), 1)
+
+
+class TestNotebookTrackingAndGeometry(unittest.TestCase):
+    def setUp(self):
+        self.tracker = NotebookTracker()
+
+    def test_synthetic_horizontal_notebook(self):
+        # Create an image with an orange rectangle in the center
+        img = np.zeros((480, 640, 3), dtype=np.uint8)
+        # BGR for orange: B=40, G=140, R=240
+        cv2.rectangle(img, (180, 140), (460, 340), (40, 140, 240), -1)
+
+        nb = self.tracker.process_frame(img)
+        self.assertTrue(nb.is_detected)
+        self.assertEqual(len(nb.corners), 4)
+        # Check center is near (320, 240)
+        self.assertAlmostEqual(nb.center[0], 320, delta=20)
+        self.assertAlmostEqual(nb.center[1], 240, delta=20)
+        # Horizontal rectangle -> rotation angle near 0.0
+        self.assertAlmostEqual(nb.rotation_angle, 0.0, delta=5.0)
+
+    def test_clockwise_and_counterclockwise_rotation(self):
+        # Clockwise tilted rectangle
+        img_cw = np.zeros((480, 640, 3), dtype=np.uint8)
+        pts_cw = np.array([[220, 120], [480, 200], [420, 380], [160, 300]], dtype=np.int32)
+        cv2.fillPoly(img_cw, [pts_cw], (40, 140, 240))
+
+        tracker_cw = NotebookTracker()
+        nb_cw = tracker_cw.process_frame(img_cw)
+        self.assertTrue(nb_cw.is_detected)
+        self.assertGreater(nb_cw.rotation_angle, 5.0)  # Clockwise -> positive angle
+
+        # Counter-Clockwise tilted rectangle
+        img_ccw = np.zeros((480, 640, 3), dtype=np.uint8)
+        pts_ccw = np.array([[180, 220], [440, 140], [500, 320], [240, 400]], dtype=np.int32)
+        cv2.fillPoly(img_ccw, [pts_ccw], (40, 140, 240))
+
+        tracker_ccw = NotebookTracker()
+        nb_ccw = tracker_ccw.process_frame(img_ccw)
+        self.assertTrue(nb_ccw.is_detected)
+        self.assertLess(nb_ccw.rotation_angle, -5.0)  # CCW -> negative angle
+
+    def test_smoothing_measurement(self):
+        # Tracker with smoothing
+        tracker = NotebookTracker(smoothing=0.5)
+        img = np.zeros((480, 640, 3), dtype=np.uint8)
+        cv2.rectangle(img, (200, 150), (440, 330), (40, 140, 240), -1)
+
+        nb1 = tracker.process_frame(img)
+        self.assertTrue(nb1.is_detected)
+        first_angle = nb1.rotation_angle
+
+        # Slight noise/jitter in frame
+        img2 = np.zeros((480, 640, 3), dtype=np.uint8)
+        pts_j = np.array([[202, 151], [442, 153], [440, 333], [200, 331]], dtype=np.int32)
+        cv2.fillPoly(img2, [pts_j], (40, 140, 240))
+        nb2 = tracker.process_frame(img2)
+        self.assertTrue(nb2.is_detected)
+        self.assertAlmostEqual(nb2.rotation_angle, first_angle, delta=3.0)
+
+    def test_user_reference_image_detection(self):
+        ref_path = r"C:\Users\Vikrant\.gemini\antigravity-ide\brain\8abb5107-83f3-49a6-b92d-cfa3075aeee9\.user_uploaded\media_1792431586452.png"
+        if os.path.exists(ref_path):
+            img = cv2.imread(ref_path)
+            self.assertIsNotNone(img)
+            tracker = NotebookTracker()
+            nb = tracker.process_frame(img)
+            self.assertTrue(nb.is_detected)
+            self.assertEqual(len(nb.corners), 4)
+            self.assertGreater(nb.area, 50000)
+            self.assertAlmostEqual(nb.center[0], 400, delta=40)
+            self.assertAlmostEqual(nb.center[1], 379, delta=40)
+
+
+class TestRightHandIndexFingerGesture(unittest.TestCase):
+    def setUp(self):
+        self.calib = CalibrationManager(filepath="test_temp_right_idx.json")
+        self.calib.config["accel_mode"] = "right_index"
+        self.calib.config["gesture_confirm_frames"] = 2
+        self.detector = GestureDetector(self.calib)
+
+    def tearDown(self):
+        if os.path.exists("test_temp_right_idx.json"):
+            try:
+                os.remove("test_temp_right_idx.json")
+            except Exception:
+                pass
+
+    def test_right_hand_index_raised_triggers_acceleration(self):
+        # Physical right hand with index raised
+        hand = HandData(
+            is_detected=True,
+            handedness="Right",
+            right_hand_detected=True,
+            right_index_raised=True,
+            hand_center=(0.7, 0.5),
+            hand_size=0.20
+        )
+        # Two frames for confirmation debounce
+        self.detector.evaluate(hand)
+        state = self.detector.evaluate(hand)
+        self.assertTrue(state.accelerate)
+        self.assertIn("INDEX", state.gesture_name)
+
+    def test_left_hand_index_does_not_trigger_acceleration(self):
+        # Physical left hand with index raised: right_index_raised is False
+        hand = HandData(
+            is_detected=True,
+            handedness="Left",
+            right_hand_detected=False,
+            right_index_raised=False,
+            hand_center=(0.3, 0.5),
+            hand_size=0.20
+        )
+        self.detector.evaluate(hand)
+        state = self.detector.evaluate(hand)
+        self.assertFalse(state.accelerate)
+
+    def test_open_hand_does_not_trigger_acceleration(self):
+        # Right hand open (palm, all fingers extended) -> right_index_raised is False
+        hand = HandData(
+            is_detected=True,
+            handedness="Right",
+            right_hand_detected=True,
+            right_index_raised=False,
+            hand_center=(0.7, 0.5),
+            hand_size=0.20
+        )
+        self.detector.evaluate(hand)
+        state = self.detector.evaluate(hand)
+        self.assertFalse(state.accelerate)
+
+    def test_immediate_release_on_lowering_finger(self):
+        # First accelerate
+        hand_up = HandData(
+            is_detected=True,
+            right_hand_detected=True,
+            right_index_raised=True,
+            hand_center=(0.7, 0.5),
+            hand_size=0.20
+        )
+        self.detector.evaluate(hand_up)
+        state1 = self.detector.evaluate(hand_up)
+        self.assertTrue(state1.accelerate)
+
+        # Lower finger
+        hand_down = HandData(
+            is_detected=True,
+            right_hand_detected=True,
+            right_index_raised=False,
+            hand_center=(0.7, 0.5),
+            hand_size=0.20
+        )
+        state2 = self.detector.evaluate(hand_down)
+        self.assertFalse(state2.accelerate)
+
+
+class TestCombinedSteeringAndAcceleration(unittest.TestCase):
+    def setUp(self):
+        self.calib = CalibrationManager(filepath="test_temp_comb.json")
+        self.calib.config["notebook_steering_enabled"] = True
+        self.calib.config["notebook_deadzone_angle"] = 5.0
+        self.calib.config["notebook_max_steer_angle"] = 30.0
+        self.calib.config["gesture_confirm_frames"] = 1
+        self.detector = GestureDetector(self.calib)
+
+    def tearDown(self):
+        if os.path.exists("test_temp_comb.json"):
+            try:
+                os.remove("test_temp_comb.json")
+            except Exception:
+                pass
+
+    def test_steer_left_while_accelerating(self):
+        # Notebook tilted CCW (-20 deg) + Right index finger raised
+        nb = NotebookData(
+            is_detected=True,
+            rotation_angle=-20.0,
+            center=(320, 240)
+        )
+        hand = HandData(
+            is_detected=True,
+            right_hand_detected=True,
+            right_index_raised=True,
+            hand_center=(0.7, 0.5)
+        )
+        state = self.detector.evaluate(hand, notebook_data=nb)
+        self.assertTrue(state.steer_left)
+        self.assertFalse(state.steer_right)
+        self.assertTrue(state.accelerate)
+        self.assertLess(state.steering_val, 0.0)
+
+    def test_steer_right_while_accelerating(self):
+        # Notebook tilted CW (+20 deg) + Right index finger raised
+        nb = NotebookData(
+            is_detected=True,
+            rotation_angle=20.0,
+            center=(320, 240)
+        )
+        hand = HandData(
+            is_detected=True,
+            right_hand_detected=True,
+            right_index_raised=True,
+            hand_center=(0.7, 0.5)
+        )
+        state = self.detector.evaluate(hand, notebook_data=nb)
+        self.assertTrue(state.steer_right)
+        self.assertFalse(state.steer_left)
+        self.assertTrue(state.accelerate)
+        self.assertGreater(state.steering_val, 0.0)
+
+    def test_straight_acceleration(self):
+        # Notebook centered within deadzone (2 deg < 5 deg) + Right index raised
+        nb = NotebookData(
+            is_detected=True,
+            rotation_angle=2.0,
+            center=(320, 240)
+        )
+        hand = HandData(
+            is_detected=True,
+            right_hand_detected=True,
+            right_index_raised=True,
+            hand_center=(0.7, 0.5)
+        )
+        state = self.detector.evaluate(hand, notebook_data=nb)
+        self.assertFalse(state.steer_left)
+        self.assertFalse(state.steer_right)
+        self.assertEqual(state.steering_val, 0.0)
+        self.assertTrue(state.accelerate)
+
+    def test_tracking_loss_releases_all_inputs(self):
+        # Notebook and hand not detected
+        nb = NotebookData(is_detected=False)
+        hand = HandData(is_detected=False)
+        state = self.detector.evaluate(hand, notebook_data=nb)
+        self.assertFalse(state.steer_left)
+        self.assertFalse(state.steer_right)
+        self.assertFalse(state.accelerate)
+        self.assertEqual(state.steering_val, 0.0)
+
+
+class TestNotebookCalibrationWizard(unittest.TestCase):
+    def setUp(self):
+        self.test_cfg = "test_nb_wizard.json"
+        self.calib = CalibrationManager(filepath=self.test_cfg)
+        self.calib.phase_duration = 0.01  # fast testing
+
+    def tearDown(self):
+        if os.path.exists(self.test_cfg):
+            try:
+                os.remove(self.test_cfg)
+            except Exception:
+                pass
+
+    def test_full_notebook_wizard_workflow(self):
+        self.calib.start_notebook_calibration()
+        self.assertTrue(self.calib.is_calibrating)
+        self.assertEqual(self.calib.calibration_phase, "nb_neutral")
+
+        # Phase 1: Neutral (hold at 0.5 deg)
+        nb = NotebookData(is_detected=True, rotation_angle=0.5, center=(320, 240))
+        hand = HandData(is_detected=True)
+        self.calib.update_notebook_calibration(nb, hand)
+        time.sleep(0.015)
+        done, msg, prog = self.calib.update_notebook_calibration(nb, hand)
+        self.assertFalse(done)
+        self.assertEqual(self.calib.calibration_phase, "nb_rot_left")
+
+        # Phase 2: Rotate Left (-25 deg)
+        nb_left = NotebookData(is_detected=True, rotation_angle=-25.0, center=(320, 240))
+        self.calib.update_notebook_calibration(nb_left, hand)
+        time.sleep(0.015)
+        done, msg, prog = self.calib.update_notebook_calibration(nb_left, hand)
+        self.assertFalse(done)
+        self.assertEqual(self.calib.calibration_phase, "nb_rot_right")
+
+        # Phase 3: Rotate Right (+25 deg)
+        nb_right = NotebookData(is_detected=True, rotation_angle=25.0, center=(320, 240))
+        self.calib.update_notebook_calibration(nb_right, hand)
+        time.sleep(0.015)
+        done, msg, prog = self.calib.update_notebook_calibration(nb_right, hand)
+        self.assertFalse(done)
+        self.assertEqual(self.calib.calibration_phase, "nb_right_index")
+
+        # Phase 4: Right index finger raised
+        hand_idx = HandData(is_detected=True, right_hand_detected=True, right_index_raised=True)
+        self.calib.update_notebook_calibration(nb, hand_idx)
+        time.sleep(0.015)
+        done, msg, prog = self.calib.update_notebook_calibration(nb, hand_idx)
+        self.assertTrue(done)
+        self.assertEqual(self.calib.calibration_phase, "done")
+        self.assertTrue(self.calib.config.get("notebook_calibrated"))
+        self.assertTrue(self.calib.notebook_steering_enabled)
 
 
 if __name__ == "__main__":

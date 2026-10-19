@@ -348,7 +348,18 @@ class MainWindow(ctk.CTk):
             font=ctk.CTkFont(size=11, weight="bold"),
             command=self._toggle_two_hand_wheel
         )
-        self.wheel_mode_btn.pack(fill="x")
+        self.wheel_mode_btn.pack(fill="x", pady=(0, 4))
+
+        self.notebook_mode_btn = ctk.CTkButton(
+            wheel_toggle_row,
+            text=f"📓 Notebook Steering: {'ON' if self.calibration.notebook_steering_enabled else 'OFF'}",
+            fg_color="#D97706" if self.calibration.notebook_steering_enabled else "#252A34",
+            hover_color="#F59E0B" if self.calibration.notebook_steering_enabled else "#333A48",
+            text_color="#000000" if self.calibration.notebook_steering_enabled else TEXT_WHITE,
+            font=ctk.CTkFont(size=11, weight="bold"),
+            command=self._toggle_notebook_mode
+        )
+        self.notebook_mode_btn.pack(fill="x")
 
         # 3. LIVE TELEMETRY CARD
         self._create_panel_header(self.right_col, "LIVE SYSTEM TELEMETRY")
@@ -357,6 +368,8 @@ class MainWindow(ctk.CTk):
 
         self.cam_status_lbl = self._create_telemetry_row(telem_card, "Camera Feed:", "CHECKING...", ACCENT_AMBER)
         self.tracking_status_lbl = self._create_telemetry_row(telem_card, "Hand Tracking:", "SEARCHING...", ACCENT_AMBER)
+        self.notebook_status_lbl = self._create_telemetry_row(telem_card, "Notebook Wheel:", "SEARCHING...", ACCENT_AMBER)
+        self.right_index_lbl = self._create_telemetry_row(telem_card, "Right Index Finger:", "LOWERED", TEXT_MUTED)
         self.gesture_lbl = self._create_telemetry_row(telem_card, "Current Gesture:", "IDLE", TEXT_WHITE)
         self.throttle_lbl = self._create_telemetry_row(telem_card, "Acceleration:", "RELEASED", TEXT_MUTED)
         self.brake_lbl = self._create_telemetry_row(telem_card, "Braking Status:", "RELEASED", TEXT_MUTED)
@@ -369,7 +382,7 @@ class MainWindow(ctk.CTk):
 
         calib_desc = ctk.CTkLabel(
             calib_card,
-            text="Recalibrate at any time. Mutes steering during calibration to prevent accidental movement.",
+            text="Calibrate notebook steering wheel or hands. Steering is muted during calibration for safety.",
             font=ctk.CTkFont(size=11),
             text_color=TEXT_MUTED,
             wraplength=340,
@@ -384,12 +397,29 @@ class MainWindow(ctk.CTk):
         self.calib_msg_lbl = ctk.CTkLabel(calib_card, text="Status: Ready to calibrate", font=ctk.CTkFont(size=11, weight="bold"), text_color=ACCENT_GREEN)
         self.calib_msg_lbl.pack(padx=12, pady=(0, 6), anchor="w")
 
+        # Row 1 of calibration: Notebook Calibration Wizard
+        calib_nb_row = ctk.CTkFrame(calib_card, fg_color="transparent")
+        calib_nb_row.pack(fill="x", padx=10, pady=(2, 4))
+
+        self.calib_notebook_btn = ctk.CTkButton(
+            calib_nb_row,
+            text="📓 CALIBRATE NOTEBOOK WHEEL (4-STEP)",
+            fg_color="#D97706",
+            hover_color="#F59E0B",
+            text_color="#000000",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            height=34,
+            command=self._on_start_notebook_calibration
+        )
+        self.calib_notebook_btn.pack(fill="x")
+
+        # Row 2 of calibration: Quick Hand & Guided Hand buttons
         calib_btn_row = ctk.CTkFrame(calib_card, fg_color="transparent")
         calib_btn_row.pack(fill="x", padx=10, pady=(0, 10))
 
         self.calib_quick_btn = ctk.CTkButton(
             calib_btn_row,
-            text="🎯 Quick Neutral (2.5s)",
+            text="🎯 Quick Hand (2.5s)",
             fg_color="#1A3A54",
             hover_color="#234E72",
             text_color=ACCENT_BLUE,
@@ -400,7 +430,7 @@ class MainWindow(ctk.CTk):
 
         self.calib_guided_btn = ctk.CTkButton(
             calib_btn_row,
-            text="📐 Guided Range (3-Step)",
+            text="📐 Hand Range (3-Step)",
             fg_color="#252A34",
             hover_color="#333A48",
             text_color=TEXT_WHITE,
@@ -524,6 +554,19 @@ class MainWindow(ctk.CTk):
         status_str = "ON (with 1-hand fallback)" if new_val else "OFF"
         self.wheel_mode_btn.configure(text=f"🚗 Two-Hand Virtual Wheel: {status_str}", fg_color="#0077BE" if new_val else "#252A34")
 
+    def _toggle_notebook_mode(self):
+        curr = self.calibration.notebook_steering_enabled
+        new_val = not curr
+        self.calibration.set_notebook_steering_enabled(new_val)
+        status_str = "ON" if new_val else "OFF"
+        self.notebook_mode_btn.configure(
+            text=f"📓 Notebook Steering: {status_str}",
+            fg_color="#D97706" if new_val else "#252A34",
+            hover_color="#F59E0B" if new_val else "#333A48",
+            text_color="#000000" if new_val else TEXT_WHITE
+        )
+        logger.info(f"Notebook steering toggled: {status_str}")
+
     def _on_start_driving(self):
         self.is_driving = True
         self.keyboard_ctrl.set_enabled(True)
@@ -565,6 +608,10 @@ class MainWindow(ctk.CTk):
         except Exception as e:
             logger.error(f"Error opening browser: {e}")
 
+    def _on_start_notebook_calibration(self):
+        self.calibration.start_notebook_calibration()
+        self.calib_notebook_btn.configure(text="📓 Calibrating Notebook...", state="disabled")
+
     def _on_start_quick_calibration(self):
         self.calibration.start_quick_calibration()
         self.calib_quick_btn.configure(text="Sampling...", state="disabled")
@@ -601,6 +648,13 @@ class MainWindow(ctk.CTk):
         self.wheel_mode_btn.configure(
             text=f"🚗 Two-Hand Virtual Wheel: {status_str}",
             fg_color="#0077BE" if self.calibration.two_hand_mode_enabled else "#252A34"
+        )
+        nb_str = "ON" if self.calibration.notebook_steering_enabled else "OFF"
+        self.notebook_mode_btn.configure(
+            text=f"📓 Notebook Steering: {nb_str}",
+            fg_color="#D97706" if self.calibration.notebook_steering_enabled else "#252A34",
+            hover_color="#F59E0B" if self.calibration.notebook_steering_enabled else "#333A48",
+            text_color="#000000" if self.calibration.notebook_steering_enabled else TEXT_WHITE
         )
 
     def _show_session_history_dialog(self):
@@ -641,7 +695,7 @@ class MainWindow(ctk.CTk):
     def _update_ui_loop(self):
         """Periodic UI update loop (~30 FPS)."""
         if self.camera_thread:
-            pil_img, state, hand, fps, is_connected = self.camera_thread.get_latest_snapshot()
+            pil_img, state, hand, nb, fps, is_connected = self.camera_thread.get_latest_snapshot()
 
             # 1. Video Preview
             if pil_img:
@@ -664,7 +718,7 @@ class MainWindow(ctk.CTk):
             else:
                 self.cam_status_lbl.configure(text="DISCONNECTED", text_color=ACCENT_RED)
 
-            # 3. Hand Tracking Status & Two-Hand indicator
+            # 3. Hand & Notebook Tracking Status & Indicators
             if hand.is_detected:
                 if hand.is_two_handed:
                     self.tracking_status_lbl.configure(text="LOCKED [2 HANDS WHEEL]", text_color=ACCENT_GREEN)
@@ -674,6 +728,21 @@ class MainWindow(ctk.CTk):
                     self.tracking_status_lbl.configure(text=f"LOCKED ({hand.handedness})", text_color=ACCENT_GREEN)
             else:
                 self.tracking_status_lbl.configure(text="SEARCHING HAND...", text_color=ACCENT_AMBER)
+
+            # Notebook Wheel Status
+            if nb and nb.is_detected:
+                nb_rot_str = f"{nb.rotation_angle:+.1f}°"
+                self.notebook_status_lbl.configure(text=f"LOCKED ({nb_rot_str})", text_color=ACCENT_GREEN)
+            else:
+                self.notebook_status_lbl.configure(text="SEARCHING NOTEBOOK...", text_color=ACCENT_AMBER)
+
+            # Right Index Finger Status
+            if hand.right_index_raised:
+                self.right_index_lbl.configure(text="▲ RAISED (GAS ACTIVE)", text_color=ACCENT_GREEN)
+            elif hand.is_detected:
+                self.right_index_lbl.configure(text="LOWERED (COAST)", text_color=TEXT_MUTED)
+            else:
+                self.right_index_lbl.configure(text="SEARCHING HAND...", text_color=TEXT_MUTED)
 
             # 4. Gesture Name
             self.gesture_lbl.configure(text=state.gesture_name)
@@ -739,9 +808,14 @@ class MainWindow(ctk.CTk):
                 self.calib_msg_lbl.configure(text=msg, text_color=ACCENT_BLUE)
             else:
                 self.calib_prog_bar.set(1.0 if self.calibration.config.get("is_calibrated") else 0.0)
-                self.calib_msg_lbl.configure(text="Neutral Centered & Calibrated", text_color=ACCENT_GREEN)
-                self.calib_quick_btn.configure(text="🎯 Quick Neutral (2.5s)", state="normal")
-                self.calib_guided_btn.configure(text="📐 Guided Range (3-Step)", state="normal")
+                if self.calibration.config.get("notebook_calibrated"):
+                    neutral = float(self.calibration.config.get("notebook_neutral_angle", 0.0))
+                    self.calib_msg_lbl.configure(text=f"Notebook Calibrated (Neutral: {neutral:+.1f}°)", text_color=ACCENT_GREEN)
+                else:
+                    self.calib_msg_lbl.configure(text="Neutral Centered & Calibrated", text_color=ACCENT_GREEN)
+                self.calib_notebook_btn.configure(text="📓 CALIBRATE NOTEBOOK WHEEL (4-STEP)", state="normal")
+                self.calib_quick_btn.configure(text="🎯 Quick Hand (2.5s)", state="normal")
+                self.calib_guided_btn.configure(text="📐 Hand Range (3-Step)", state="normal")
 
             # 10. Safety Re-Arm Banner check
             if self.keyboard_ctrl.is_interrupted and self.is_driving and not self.is_practice_mode:

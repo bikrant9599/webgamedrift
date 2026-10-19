@@ -101,7 +101,57 @@ class SettingsWindow(ctk.CTkToplevel):
         )
         self.btn_pro.pack(side="left", padx=3, expand=True, fill="x")
 
-        # 2. VIRTUAL STEERING WHEEL & MODE
+        # 2. NOTEBOOK PHYSICAL STEERING WHEEL
+        self._create_section_label(self.scroll, "NOTEBOOK PHYSICAL STEERING WHEEL")
+        nb_frame = ctk.CTkFrame(self.scroll, fg_color=PANEL_BG, corner_radius=8, border_width=1, border_color=BORDER_COLOR)
+        nb_frame.pack(fill="x", pady=4, padx=4)
+
+        nb_switch_row = ctk.CTkFrame(nb_frame, fg_color="transparent")
+        nb_switch_row.pack(fill="x", padx=12, pady=8)
+        self.nb_steering_switch = ctk.CTkSwitch(
+            nb_switch_row,
+            text="Enable Physical Notebook Steering (Webcam Tracking)",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            progress_color="#D97706",
+            command=self._on_nb_switch_toggle
+        )
+        self.nb_steering_switch.pack(side="left")
+
+        # Deadzone slider
+        nb_dz_row = ctk.CTkFrame(nb_frame, fg_color="transparent")
+        nb_dz_row.pack(fill="x", padx=12, pady=(4, 2))
+        self.nb_dz_lbl = ctk.CTkLabel(nb_dz_row, text="Notebook Steering Deadzone: 5.0°", font=ctk.CTkFont(size=12), text_color=TEXT_PRIMARY)
+        self.nb_dz_lbl.pack(side="left")
+        self.nb_dz_slider = ctk.CTkSlider(
+            nb_frame, from_=1.0, to=15.0, number_of_steps=14,
+            progress_color="#D97706", button_color="#F59E0B", command=self._on_nb_dz_change
+        )
+        self.nb_dz_slider.pack(fill="x", padx=14, pady=2)
+
+        # Max Steering Angle slider
+        nb_max_row = ctk.CTkFrame(nb_frame, fg_color="transparent")
+        nb_max_row.pack(fill="x", padx=12, pady=(4, 2))
+        self.nb_max_lbl = ctk.CTkLabel(nb_max_row, text="Max Steering Angle (100% Turn): 32.0°", font=ctk.CTkFont(size=12), text_color=TEXT_PRIMARY)
+        self.nb_max_lbl.pack(side="left")
+        self.nb_max_slider = ctk.CTkSlider(
+            nb_frame, from_=15.0, to=50.0, number_of_steps=35,
+            progress_color="#D97706", button_color="#F59E0B", command=self._on_nb_max_change
+        )
+        self.nb_max_slider.pack(fill="x", padx=14, pady=2)
+
+        # Color Profile dropdown
+        nb_color_row = ctk.CTkFrame(nb_frame, fg_color="transparent")
+        nb_color_row.pack(fill="x", padx=12, pady=(4, 10))
+        ctk.CTkLabel(nb_color_row, text="Notebook Color Profile:", font=ctk.CTkFont(size=12), text_color=TEXT_PRIMARY).pack(side="left")
+        self.nb_color_menu = ctk.CTkOptionMenu(
+            nb_color_row,
+            values=["Orange (Default)", "Blue / Dark Cover", "Green / Bright Cover", "Red / Crimson Cover", "Any Color / Edge Adaptive"],
+            fg_color="#232731", button_color="#D97706", button_hover_color="#F59E0B",
+            command=self._on_nb_color_change
+        )
+        self.nb_color_menu.pack(side="right")
+
+        # 3. VIRTUAL STEERING WHEEL & MODE
         self._create_section_label(self.scroll, "VIRTUAL STEERING WHEEL & INPUT MODES")
         mode_frame = ctk.CTkFrame(self.scroll, fg_color=PANEL_BG, corner_radius=8, border_width=1, border_color=BORDER_COLOR)
         mode_frame.pack(fill="x", pady=4, padx=4)
@@ -299,6 +349,24 @@ class SettingsWindow(ctk.CTkToplevel):
         if curr_str in self.cam_dropdown._values:
             self.cam_dropdown.set(curr_str)
 
+        # Notebook settings
+        if self.calibration.notebook_steering_enabled:
+            self.nb_steering_switch.select()
+        else:
+            self.nb_steering_switch.deselect()
+
+        nb_dz = self.calibration.notebook_deadzone_angle
+        self.nb_dz_slider.set(nb_dz)
+        self.nb_dz_lbl.configure(text=f"Notebook Steering Deadzone: {nb_dz:.1f}°")
+
+        nb_max = self.calibration.notebook_max_steer_angle
+        self.nb_max_slider.set(nb_max)
+        self.nb_max_lbl.configure(text=f"Max Steering Angle (100% Turn): {nb_max:.1f}°")
+
+        color_name = self.calibration.config.get("notebook_color_name", "Orange (Default)")
+        if color_name in self.nb_color_menu._values:
+            self.nb_color_menu.set(color_name)
+
         # Two hand mode
         if self.calibration.two_hand_mode_enabled:
             self.two_hand_switch.select()
@@ -341,6 +409,21 @@ class SettingsWindow(ctk.CTkToplevel):
         self._load_current_values()
         if self.on_settings_applied_cb:
             self.on_settings_applied_cb()
+
+    def _on_nb_switch_toggle(self):
+        enabled = bool(self.nb_steering_switch.get())
+        self.calibration.set_notebook_steering_enabled(enabled)
+
+    def _on_nb_dz_change(self, val: float):
+        self.calibration.set_notebook_deadzone_angle(val)
+        self.nb_dz_lbl.configure(text=f"Notebook Steering Deadzone: {val:.1f}°")
+
+    def _on_nb_max_change(self, val: float):
+        self.calibration.set_notebook_max_steer_angle(val)
+        self.nb_max_lbl.configure(text=f"Max Steering Angle (100% Turn): {val:.1f}°")
+
+    def _on_nb_color_change(self, val: str):
+        self.calibration.set_notebook_color_profile(val)
 
     def _on_two_hand_toggle(self):
         enabled = bool(self.two_hand_switch.get())

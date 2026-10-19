@@ -1,7 +1,7 @@
 """
 Hand tracking module using MediaPipe Hands.
-Supports single-hand tracking and dual-hand virtual steering wheel tracking,
-automatic model resolution, coordinate smoothing (EMA), and single-hand fallback.
+Supports single-hand tracking, dual-hand tracking, accurate handedness detection (Left vs Right),
+and specific gesture recognition including the right-hand raised-index-finger acceleration gesture.
 """
 
 import os
@@ -66,19 +66,27 @@ class HandData:
     second_landmarks_pixel: List[Tuple[int, int]] = field(default_factory=list)
     second_fingers_extended: List[bool] = field(default_factory=lambda: [False]*5)
 
+    # Specific Right-Hand Index Finger Gesture Recognition
+    right_hand_detected: bool = False
+    left_hand_detected: bool = False
+    right_index_raised: bool = False
+    right_hand_landmarks: List[Tuple[int, int]] = field(default_factory=list)
+    left_hand_landmarks: List[Tuple[int, int]] = field(default_factory=list)
+
     confidence: float = 0.0
     tracking_lost_time: float = 0.0
 
 
 class HandTracker:
     """
-    Tracks hand landmarks using MediaPipe with EMA smoothing and 2-hand wheel support.
+    Tracks hand landmarks using MediaPipe with EMA smoothing, dual-hand detection,
+    and right-hand index-finger forward gesture recognition.
     """
 
     def __init__(self,
-                 two_handed_mode: bool = False,
-                 min_detection_confidence: float = 0.60,
-                 min_tracking_confidence: float = 0.55,
+                 two_handed_mode: bool = True,  # Default True to allow notebook & dual-hand detection
+                 min_detection_confidence: float = 0.55,
+                 min_tracking_confidence: float = 0.50,
                  smoothing_factor: float = 0.45):
         self.two_handed_mode = two_handed_mode
         self.min_detection_confidence = min_detection_confidence
@@ -154,7 +162,8 @@ class HandTracker:
 
     def process_frame(self, frame_bgr: np.ndarray, mirror: bool = True) -> Tuple[np.ndarray, HandData]:
         """
-        Process camera frame and detect single or dual hands.
+        Process camera frame and detect single or dual hands, accurately identifying
+        the physical Right Hand and detecting the raised index finger gesture.
         """
         if frame_bgr is None:
             return frame_bgr, HandData(is_detected=False)
@@ -169,7 +178,7 @@ class HandTracker:
             return frame_bgr, hand_data
 
         detected_hands_raw: List[np.ndarray] = []
-        detected_handedness: List[str] = []
+        detected_labels: List[str] = []
 
         try:
             if self.api_mode == "tasks":
@@ -181,10 +190,10 @@ class HandTracker:
                     for i, lm_list in enumerate(results.hand_landmarks):
                         arr = np.array([[lm.x, lm.y, lm.z] for lm in lm_list], dtype=np.float32)
                         detected_hands_raw.append(arr)
-                        h_name = "Right"
+                        raw_label = "Right"
                         if results.handedness and i < len(results.handedness) and results.handedness[i]:
-                            h_name = results.handedness[i][0].display_name or results.handedness[i][0].category_name or "Right"
-                        detected_handedness.append(h_name)
+                            raw_label = results.handedness[i][0].display_name or results.handedness[i][0].category_name or "Right"
+                        detected_labels.append(raw_label)
 
             elif self.api_mode == "solutions":
                 frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
@@ -196,16 +205,16 @@ class HandTracker:
                     for i, lm_list in enumerate(results.multi_hand_landmarks):
                         arr = np.array([[lm.x, lm.y, lm.z] for lm in lm_list.landmark], dtype=np.float32)
                         detected_hands_raw.append(arr)
-                        h_name = "Right"
+                        raw_label = "Right"
                         if results.multi_handedness and i < len(results.multi_handedness):
-                            h_name = results.multi_handedness[i].classification[0].label
-                        detected_handedness.append(h_name)
+                            raw_label = results.multi_handedness[i].classification[0].label
+                        detected_labels.append(raw_label)
 
         except Exception as e:
             logger.debug(f"Hand detection error: {e}")
             detected_hands_raw.clear()
 
-        # Check if no hands detected
+        # If no hands detected
         if not detected_hands_raw:
             self._smoothed_landmarks = None
             self._smoothed_center = None
@@ -221,34 +230,76 @@ class HandTracker:
         alpha = self.smoothing_factor
 
         # -------------------------------------------------------------
-        # TWO-HAND VIRTUAL STEERING WHEEL LOGIC
+        # ACCURATE PHYSICAL RIGHT VS LEFT HAND IDENTIFICATION
         # -------------------------------------------------------------
-        if self.two_handed_mode and len(detected_hands_raw) >= 2:
+        # In a mirrored selfie feed (mirror=True):
+        # - The user's actual right hand is positioned on the right side of the screen (x > 0.5 or rightmost x).
+        # - The user's actual left hand is on the left side of the screen (x < 0.5 or leftmost x).
+        # In an unmirrored feed (mirror=False):
+        # - The user's actual right hand is on screen left (x < 0.5).
+        right_hand_raw = None
+        left_hand_raw = None
+
+        if len(detected_hands_raw) >= 2:
+            cx0 = float(np.mean(detected_hands_raw[0][[0, 5, 9, 17], 0]))
+            cx1 = float(np.mean(detected_hands_raw[1][[0, 5, 9, 17], 0]))
+
+            if mirror:
+                # Rightmost is user's physical Right hand in mirrored view
+                if cx0 < cx1:
+                    left_hand_raw = detected_hands_raw[0]
+                    right_hand_raw = detected_hands_raw[1]
+                else:
+                    left_hand_raw = detected_hands_raw[1]
+                    right_hand_raw = detected_hands_raw[0]
+            else:
+                # Leftmost is user's physical Right hand in unmirrored view
+                if cx0 < cx1:
+                    right_hand_raw = detected_hands_raw[0]
+                    left_hand_raw = detected_hands_raw[1]
+                else:
+                    right_hand_raw = detected_hands_raw[1]
+                    left_hand_raw = detected_hands_raw[0]
+
+        elif len(detected_hands_raw) == 1:
+            h0 = detected_hands_raw[0]
+            cx = float(np.mean(h0[[0, 5, 9, 17], 0]))
+            # Determine if right or left
+            is_right = (cx >= 0.50) if mirror else (cx <= 0.50)
+            if is_right:
+                right_hand_raw = h0
+            else:
+                left_hand_raw = h0
+
+        # Update detected flags and pixel coordinates
+        if right_hand_raw is not None:
+            hand_data.right_hand_detected = True
+            hand_data.right_hand_landmarks = [(int(x * w), int(y * h)) for x, y in right_hand_raw[:, :2]]
+            # Check raised index finger on the physical Right Hand
+            hand_data.right_index_raised = self._is_index_finger_raised(right_hand_raw, h, w)
+
+        if left_hand_raw is not None:
+            hand_data.left_hand_detected = True
+            hand_data.left_hand_landmarks = [(int(x * w), int(y * h)) for x, y in left_hand_raw[:, :2]]
+
+        # -------------------------------------------------------------
+        # TWO-HAND STEERING WHEEL CALCULATIONS
+        # -------------------------------------------------------------
+        if self.two_handed_mode and len(detected_hands_raw) >= 2 and left_hand_raw is not None and right_hand_raw is not None:
             hand_data.is_two_handed = True
             hand_data.is_fallback = False
 
-            # Sort hands horizontally: left hand on screen left, right hand on screen right
-            # Hand center X of first vs second
-            h0_cx = float(np.mean(detected_hands_raw[0][[0, 5, 9, 17], 0]))
-            h1_cx = float(np.mean(detected_hands_raw[1][[0, 5, 9, 17], 0]))
-
-            if h0_cx < h1_cx:
-                left_raw, right_raw = detected_hands_raw[0], detected_hands_raw[1]
-            else:
-                left_raw, right_raw = detected_hands_raw[1], detected_hands_raw[0]
-
             # Smooth primary (left) and secondary (right)
             if self._smoothed_landmarks is None:
-                self._smoothed_landmarks = left_raw.copy()
+                self._smoothed_landmarks = left_hand_raw.copy()
             else:
-                self._smoothed_landmarks = alpha * left_raw + (1.0 - alpha) * self._smoothed_landmarks
+                self._smoothed_landmarks = alpha * left_hand_raw + (1.0 - alpha) * self._smoothed_landmarks
 
             if self._smoothed_second_landmarks is None:
-                self._smoothed_second_landmarks = right_raw.copy()
+                self._smoothed_second_landmarks = right_hand_raw.copy()
             else:
-                self._smoothed_second_landmarks = alpha * right_raw + (1.0 - alpha) * self._smoothed_second_landmarks
+                self._smoothed_second_landmarks = alpha * right_hand_raw + (1.0 - alpha) * self._smoothed_second_landmarks
 
-            # Compute centroids for both hands
             left_cx = float(np.mean(self._smoothed_landmarks[[0, 5, 9, 17], 0]))
             left_cy = float(np.mean(self._smoothed_landmarks[[0, 5, 9, 17], 1]))
             right_cx = float(np.mean(self._smoothed_second_landmarks[[0, 5, 9, 17], 0]))
@@ -258,11 +309,6 @@ class HandTracker:
             hand_data.right_hand_center = (right_cx, right_cy)
             hand_data.hand_center = ((left_cx + right_cx) / 2.0, (left_cy + right_cy) / 2.0)
 
-            # Calculate steering-wheel rotation angle
-            # dx is horizontal separation (right - left), dy is vertical separation (right - left)
-            # In image coords, Y increases downward.
-            # When wheel is turned RIGHT: right hand moves down (dy > 0), left hand moves up.
-            # When wheel is turned LEFT: right hand moves up (dy < 0), left hand moves down.
             dx = right_cx - left_cx
             dy = right_cy - left_cy
             raw_wheel_angle = math.degrees(math.atan2(dy, max(0.05, dx)))
@@ -276,40 +322,33 @@ class HandTracker:
             hand_data.wheel_angle = self._smoothed_wheel_angle
             hand_data.tilt_angle = self._smoothed_wheel_angle
 
-            # Extract pixel landmarks and finger extensions for both hands
             hand_data.landmarks_pixel = [(int(x * w), int(y * h)) for x, y in self._smoothed_landmarks[:, :2]]
             hand_data.second_landmarks_pixel = [(int(x * w), int(y * h)) for x, y in self._smoothed_second_landmarks[:, :2]]
 
             hand_data.fingers_extended = self._detect_extended_fingers(self._smoothed_landmarks)
             hand_data.second_fingers_extended = self._detect_extended_fingers(self._smoothed_second_landmarks)
 
-            # Hand size (average size of both hands)
             sz1 = float(np.linalg.norm(self._smoothed_landmarks[0, :2] - self._smoothed_landmarks[9, :2]))
             sz2 = float(np.linalg.norm(self._smoothed_second_landmarks[0, :2] - self._smoothed_second_landmarks[9, :2]))
             hand_data.hand_size = (sz1 + sz2) / 2.0
-
             return frame_bgr, hand_data
 
         # -------------------------------------------------------------
-        # SINGLE HAND (OR FALLBACK FROM TWO-HAND)
+        # SINGLE HAND TRACKING (OR FALLBACK)
         # -------------------------------------------------------------
-        raw_landmarks = detected_hands_raw[0]
-        hand_data.handedness = detected_handedness[0] if detected_handedness else "Right"
-
+        raw_primary = detected_hands_raw[0]
         if self.two_handed_mode:
-            # Fallback engaged because only 1 hand is visible
             hand_data.is_two_handed = False
             hand_data.is_fallback = True
 
         if self._smoothed_landmarks is None:
-            self._smoothed_landmarks = raw_landmarks.copy()
+            self._smoothed_landmarks = raw_primary.copy()
         else:
-            self._smoothed_landmarks = alpha * raw_landmarks + (1.0 - alpha) * self._smoothed_landmarks
+            self._smoothed_landmarks = alpha * raw_primary + (1.0 - alpha) * self._smoothed_landmarks
 
         hand_data.landmarks_pixel = [(int(x * w), int(y * h)) for x, y in self._smoothed_landmarks[:, :2]]
         hand_data.landmarks_norm = [(float(x), float(y), float(z)) for x, y, z in self._smoothed_landmarks]
 
-        # Centroid
         pts = self._smoothed_landmarks[[0, 5, 9, 17], :2]
         raw_center = (float(np.mean(pts[:, 0])), float(np.mean(pts[:, 1])))
         if self._smoothed_center is None:
@@ -321,7 +360,6 @@ class HandTracker:
             )
         hand_data.hand_center = self._smoothed_center
 
-        # Size
         wrist = self._smoothed_landmarks[0, :2]
         middle_mcp = self._smoothed_landmarks[9, :2]
         raw_size = float(np.linalg.norm(wrist - middle_mcp))
@@ -331,16 +369,53 @@ class HandTracker:
             self._smoothed_size = alpha * raw_size + (1.0 - alpha) * self._smoothed_size
         hand_data.hand_size = self._smoothed_size
 
-        # Tilt angle deviation from vertical (0 deg = straight up)
         dx = middle_mcp[0] - wrist[0]
         dy = middle_mcp[1] - wrist[1]
         raw_angle = math.degrees(math.atan2(dx, -dy))
         hand_data.tilt_angle = max(-90.0, min(90.0, raw_angle))
-        hand_data.wheel_angle = hand_data.tilt_angle  # fallback wheel angle
+        hand_data.wheel_angle = hand_data.tilt_angle
 
         hand_data.fingers_extended = self._detect_extended_fingers(self._smoothed_landmarks)
-
         return frame_bgr, hand_data
+
+    def _is_index_finger_raised(self, landmarks: np.ndarray, h: int, w: int) -> bool:
+        """
+        Returns True if the index finger is raised and extended,
+        while the other three fingers (middle, ring, pinky) are sufficiently curled.
+        """
+        wrist = landmarks[0, :2]
+
+        # Index finger: tip (8), dip (7), pip (6), mcp (5)
+        i_tip = landmarks[8, :2]
+        i_pip = landmarks[6, :2]
+        i_mcp = landmarks[5, :2]
+
+        # In image coords, Y is smaller towards the top of the frame.
+        # Index finger must point upward: tip is higher than pip and mcp
+        is_index_up = (i_tip[1] < i_pip[1]) and (i_tip[1] < i_mcp[1])
+        i_dist_tip = np.linalg.norm(i_tip - wrist)
+        i_dist_pip = np.linalg.norm(i_pip - wrist)
+        is_index_extended = bool(i_dist_tip > i_dist_pip * 1.15) and is_index_up
+
+        if not is_index_extended:
+            return False
+
+        # Check that Middle (12), Ring (16), Pinky (20) are curled
+        # For curled fingers: tip is closer to wrist, or tip Y is below PIP Y
+        m_tip = landmarks[12, :2]
+        m_pip = landmarks[10, :2]
+        m_curled = (m_tip[1] >= m_pip[1] - 0.02) or (np.linalg.norm(m_tip - wrist) <= np.linalg.norm(m_pip - wrist) * 1.10)
+
+        r_tip = landmarks[16, :2]
+        r_pip = landmarks[14, :2]
+        r_curled = (r_tip[1] >= r_pip[1] - 0.02) or (np.linalg.norm(r_tip - wrist) <= np.linalg.norm(r_pip - wrist) * 1.10)
+
+        p_tip = landmarks[20, :2]
+        p_pip = landmarks[18, :2]
+        p_curled = (p_tip[1] >= p_pip[1] - 0.02) or (np.linalg.norm(p_tip - wrist) <= np.linalg.norm(p_pip - wrist) * 1.10)
+
+        # Distinguish from open palm (where middle/ring/pinky are extended)
+        return bool(is_index_extended and m_curled and r_curled and p_curled)
 
     def _detect_extended_fingers(self, landmarks: np.ndarray) -> List[bool]:
         wrist = landmarks[0, :2]

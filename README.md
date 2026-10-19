@@ -1,78 +1,78 @@
-# 🏎️ BURNOUT CAMERA DRIVE — Smart Virtual Wheel & Hilltop Edition
+# 🏎️ BURNOUT CAMERA DRIVE — Notebook Wheel & Hilltop Edition
 
 [![Windows Compatible](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-0078D6.svg?logo=windows)](https://microsoft.com)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB.svg?logo=python)](https://www.python.org/)
+[![OpenCV Notebook Steering](https://img.shields.io/badge/CV-OpenCV%20Geometric%20Tracking-5C3EE8.svg?logo=opencv)](https://opencv.org/)
 [![MediaPipe Hands](https://img.shields.io/badge/AI-MediaPipe%20Dual%20Hand-FF6F00.svg)](https://developers.google.com/mediapipe)
 [![DirectInput](https://img.shields.io/badge/Input-DirectInput%20Hardware%20Scancodes-00D2FF.svg)](#keyboard-input-safety)
 [![Local Privacy](https://img.shields.io/badge/Privacy-100%25%20Local-00FF88.svg)](#session-statistics--privacy)
 
-A high-performance Windows desktop application that allows you to control the popular browser racing game **[Burnout Drift: Hilltop](https://poki.com/en/g/burnout-drift-hilltop)** using **webcam hand movements and two-hand virtual steering** instead of a physical keyboard.
+A high-performance Windows desktop application that allows you to control the popular browser racing game **[Burnout Drift: Hilltop](https://poki.com/en/g/burnout-drift-hilltop)** using **a physical notebook held with both hands as a steering wheel** and **right-hand finger gestures** via your webcam instead of a physical keyboard.
 
-Built with **CustomTkinter** for a sleek dark racing aesthetic, **MediaPipe** for real-time 21-point dual-hand landmark tracking, and **Windows SendInput DirectInput hardware scancodes** for 100% reliable hardware response in WebGL and DirectX browser games.
+Built with **CustomTkinter** for a sleek dark racing aesthetic, **OpenCV** for real-time 4-corner geometric notebook tracking, **MediaPipe** for handedness and finger landmark recognition, and **Windows SendInput DirectInput hardware scancodes** for 100% reliable hardware response in WebGL and DirectX browser games.
 
 ---
 
-## 🎮 Driving Gestures & Controls
+## 🎮 Driving Gestures & Physical Controls
 
-| Driving Action | Physical Hand Movement | Emulated Key | Logic & Protections |
+| Driving Action | Physical Input | Emulated Key | Logic & Protections |
 | :--- | :--- | :--- | :--- |
-| **Steer Left** | Move hand left / rotate wheel counter-clockwise | `Left Arrow` (or `A`) | Proportional steering beyond deadzone with anti-flutter debounce. |
-| **Steer Right** | Move hand right / rotate wheel clockwise | `Right Arrow` (or `D`) | Proportional steering beyond deadzone with anti-flutter debounce. |
-| **Accelerate (Gas)** | Push hand forward towards camera | `Up Arrow` (or `W`) | Deliberate forward thrust with hysteresis to prevent accidental gas. |
-| **Brake (Stop)** | Form a tight **Fist** ✊ | `Down Arrow` (or `S`) | **Strictly mutually exclusive**: Instantly cuts throttle and applies brakes. |
+| **Steer Left** | Rotate notebook counter-clockwise ↺ | `Left Arrow` (or `A`) | Proportional steering beyond deadzone (default 5.0°) with EMA anti-jitter smoothing. |
+| **Steer Right** | Rotate notebook clockwise ↻ | `Right Arrow` (or `D`) | Proportional steering beyond deadzone (default 5.0°) with EMA anti-jitter smoothing. |
+| **Steer Center** | Return notebook to horizontal / neutral | *Keys Released* | Automatically snaps back to center deadzone; prevents drift or accidental turns. |
+| **Accelerate (Gas)** | Raise **Right-Hand Index Finger** ☝️ | `Up Arrow` (or `W`) | **Handedness-aware**: Only physical right index finger triggers gas (middle/ring/pinky curled). Left hand is ignored. |
+| **Simultaneous Drive** | Rotate notebook + Raise Right Index | `Left/Right + Up` | **Simultaneous multi-input**: Steer right/left while accelerating, or coast through corners. |
+| **Brake (Stop)** | Form a tight **Fist** ✊ | `Down Arrow` (or `S`) | **Strictly mutually exclusive**: Cuts throttle and immediately applies full brakes. |
 | **Handbrake (Drift)** | Flash **Peace / Victory** sign ✌️ | `Spacebar` | Immediate drift engagement (also supports Shaka 🤙 or Pinch 🤏). |
-| **Coast / Neutral** | Open, resting hand at neutral depth ✋ | *All Keys Released* | Returns car to coasting idle. |
-| **Emergency Stop** | Press <kbd>Escape</kbd> or click Red Button | *All Keys Released* | Disables inputs and locks keyboard safely. |
+| **Emergency Stop** | Press <kbd>Escape</kbd> or click Red Button | *All Keys Released* | Instantly releases all keys and halts steering inputs safely. |
 
 ---
 
 ## 🌟 Key Features & Improvements
 
-### 1. 🎯 Smart Calibration & Guided Range
-- **Quick Neutral (2.5s)**: Sets neutral resting position and hand depth.
-- **Guided 3-Step Range Calibration**: Guides you through *Neutral -> Comfortable Left -> Comfortable Right* to set a natural steering boundary tailored to your arm length and camera distance.
-- **Accidental Steering Protection**: Steering inputs are muted during calibration.
-- **Recalibrate Anytime**: Trigger calibration at any moment with one click.
+### 1. 📓 Notebook-Based Physical Steering Wheel
+- **Real-World Object Tracking**: Detects and tracks an orange (or custom colored) notebook held horizontally with both hands like a physical steering wheel.
+- **4-Corner & Outline Tracking**: Locates and renders the notebook's rectangular boundaries, 4 labeled corners (TL, TR, BR, BL), center reticle, and orientation vector.
+- **Rotation Measurement**: Calculates rotation relative to calibrated neutral angle with clockwise (steer right) and counter-clockwise (steer left) detection.
+- **Dual Visual Features**: Uses adaptive HSV color segmentation combined with geometric Canny edge/polygon contours so tracking remains robust across different lighting conditions and backgrounds.
+- **Configurable Dynamics**: Adjustable deadzone angle (1°–15°), maximum steering angle (15°–50°), and color profiles (Orange, Blue, Green, Red, Edge Adaptive).
 
-### 2. 🎚️ Smooth Steering & Sensitivity Presets
+### 2. ☝️ Right-Hand Index Finger Forward Acceleration
+- **Physical Handedness Detection**: Accurately distinguishes physical Right vs Left hand on mirrored selfie webcam feeds.
+- **Gesture Distinction**: Checks that the right index finger is raised and extended upward while the remaining fingers (middle, ring, pinky) are curled, distinguishing it cleanly from an open palm.
+- **Anti-Twitch Debounce**: Short confirmation delay prevents false activations from momentary hand repositioning.
+- **Zero Accidental Resumption**: When tracking drops or finger is lowered, acceleration releases immediately.
+
+### 3. 🎯 Smart 4-Step Notebook Calibration Wizard
+Click **`📓 CALIBRATE NOTEBOOK WHEEL (4-STEP)`** to launch the step-by-step calibration:
+1. **[1/4] Hold Notebook Horizontal**: Locks the neutral resting angle and 4 corner bounds.
+2. **[2/4] Rotate Notebook Left**: Measures maximum comfortable left steering rotation.
+3. **[3/4] Rotate Notebook Right**: Measures maximum comfortable right steering rotation.
+4. **[4/4] Raise Right Index Finger**: Verifies that your physical right index finger is detected and ready for acceleration.
+
+### 4. 🎚️ Smooth Steering & Sensitivity Presets
 - **1-Click Presets**:
-  - 🔰 **Beginner**: High deadzone (12%), gentle sensitivity (0.8x), heavy EMA smoothing (0.30), and 3-frame direction debounce.
-  - 🏎️ **Normal**: Balanced drift (8% deadzone, 1.0x sensitivity, 0.45 smoothing).
-  - ⚡ **Pro**: Ultra-responsive (4% deadzone, 1.5x sensitivity, 0.65 smoothing, instant direction shifts).
-- **Zero-Crossing Anti-Flutter**: Direction debounce prevents twitchy, violent left-right oscillations when passing through center.
-- **Clean Center Snapping**: Immediately returns steering to 0.0 and releases keys when inside deadzone.
+  - 🔰 **Beginner**: High deadzone (8.0° notebook / 12% hand), gentle sensitivity (0.8x), heavy smoothing (0.30).
+  - 🏎️ **Normal**: Balanced drift (5.0° notebook / 8% hand, 1.0x sensitivity, 0.45 smoothing).
+  - ⚡ **Pro**: Ultra-responsive (3.0° notebook / 4% hand, 1.5x sensitivity, 0.65 smoothing).
+- **Anti-Flutter Zero Crossing**: Direction debounce prevents twitchy, violent left-right oscillations when passing through center.
 
-### 3. 🚗 Two-Hand Virtual Steering Wheel
-- **Dual-Hand Tracking**: Uses MediaPipe to track both hands simultaneously.
-- **Wheel Angle Rotation**: Estimates steering wheel rotation angle from the vector between both hands.
-- **Animated HUD Steering Wheel**: Renders a dynamic racing wheel with rim, spokes, and top dead center marker that turns as you tilt your hands.
-- **Single-Hand Fallback**: If one hand drops out of the frame, the app seamlessly falls back to single-hand steering without crashing or interrupting inputs.
-- **Optional Toggle**: Easily turn Two-Hand Mode ON/OFF from the dashboard or Settings.
+### 5. 🚗 Two-Hand Virtual Wheel & Single-Hand Modes (Preserved)
+- **Two-Hand Mode**: Seamless dual-hand steering estimation without a physical object.
+- **Single-Hand Fallback**: If one hand is obscured, system automatically falls back to single-hand steering without crashing or interrupting inputs.
 
-### 4. ⚙️ Gesture Customization
-- **Configurable Triggers**:
-  - Throttle: *Forward Push (Depth)*, *Forward Up (Y Lift)*, or *Index Point*.
-  - Brakes: *Full Fist ✊* or *Thumbs Down 👎*.
-  - Handbrake: *Peace Sign ✌️*, *Shaka 🤙*, *Index-Thumb Pinch 🤏*, or *Pinky Extended*.
-- **Confirmation Debouncing**: Configure 2 to 4 confirmation frames so accidental hand twitches don't trigger inputs.
-
-### 5. 🛡️ Enhanced Safety & Manual Re-Arm
+### 6. 🛡️ Enhanced Safety & Manual Re-Arm
 - **Zero Stuck Keys Guarantee**: All keys are released when stopping, closing the app, losing tracking, or losing window focus.
-- **Anti-Auto-Resume Protection**: If tracking is lost or camera disconnects while driving, the system enters a safe paused state and displays an alert banner. **Throttle will NEVER automatically resume** until you click `RESUME DRIVING`.
+- **Anti-Auto-Resume Protection**: If tracking is lost while driving, the system pauses keyboard simulation and displays a safety banner. Throttle will NEVER automatically resume until you click `RESUME DRIVING`.
 - **Window Focus Safety**: Automatically pauses keyboard simulation when switching away from the browser.
 
-### 6. 🧪 Practice Mode
-- **Zero-Risk Testing**: Toggle `🎯 PRACTICE MODE: ON` to practice steering and gestures.
-- Telemetry, steering gauges, and active key badges light up in real time, but **zero simulated keystrokes are sent to Windows**.
+### 7. 🧪 Practice Mode
+- **Zero-Risk Testing**: Toggle `🎯 PRACTICE MODE: ON` to test notebook rotation and finger gestures with live visual HUD feedback without sending any keystrokes to Windows.
 
-### 7. 📊 Session Statistics & Privacy
+### 8. 📊 Session Statistics & Privacy
 - **Live Metrics**: Shows active session duration, net driving time, and tracking interruptions count.
 - **Local History**: Records summary metrics for your last 25 sessions in `session_history.json`.
 - **100% Private**: **No webcam images or personal data are ever uploaded, saved, or transmitted**.
-
-### 8. ↺ Settings Validation & Reset
-- Validates all sensitivity and deadzone values before saving.
-- `↺ RESET TO DEFAULTS` button resets all tuning and bindings to factory defaults.
 
 ---
 
@@ -111,13 +111,14 @@ python main.py
 ## 🕹️ Quick Play Guide
 
 1. **Launch App**: Run `python main.py`.
-2. **Open Game**: Click **`🌐 OPEN GAME`** in the top bar to launch [Burnout Drift Hilltop](https://poki.com/en/g/burnout-drift-hilltop).
-3. **Calibrate**: Hold your hand in your resting position and click **`🎯 Quick Neutral (2.5s)`** (or try Guided Range).
-4. **Focus Browser Canvas**: **Click once inside the game screen** in Chrome/Edge to give it keyboard focus.
-5. **Start Driving**: Click **`▶ START DRIVING`** (or toggle **Practice Mode** first to warm up).
-6. **Drive**:
-   - Push hand forward to hit the gas.
-   - Steer by moving left/right or tilting the virtual steering wheel.
+2. **Hold Notebook**: Hold your orange notebook horizontally with both hands like a steering wheel.
+3. **Calibrate**: Click **`📓 CALIBRATE NOTEBOOK WHEEL (4-STEP)`** and follow the on-screen prompts.
+4. **Open Game**: Click **`🌐 OPEN GAME`** in the top bar to launch [Burnout Drift Hilltop](https://poki.com/en/g/burnout-drift-hilltop).
+5. **Focus Browser Canvas**: **Click once inside the game screen** in Chrome/Edge to give it keyboard focus.
+6. **Start Driving**: Click **`▶ START DRIVING`** (or toggle **Practice Mode** first to test).
+7. **Drive**:
+   - Rotate notebook clockwise to steer right; counter-clockwise to steer left.
+   - Raise right index finger to accelerate.
    - Flash a **Peace Sign** ✌️ to pop the handbrake into high-speed drifts!
    - Form a **Fist** ✊ to brake before tight turns.
    - Press <kbd>Escape</kbd> for Emergency Stop.
@@ -126,12 +127,12 @@ python main.py
 
 ## 🧪 Automated Test Suite
 
-Run the full suite of 13 unit tests:
+Run the full suite of 26 unit & safety tests:
 ```powershell
 python tests/test_controllers.py
 ```
 ```
-Ran 13 tests in 0.109s
+Ran 26 tests in 0.226s
 OK
 ```
 
@@ -140,7 +141,7 @@ OK
 ## 📁 Project Architecture
 
 ```
-burnout_camera_drive/
+webgamedrift/
 ├── main.py                     # High-DPI entry point and exception-safe loop
 ├── requirements.txt            # Python dependencies
 ├── calibration_config.json     # User calibration, presets, and steering thresholds
@@ -148,26 +149,27 @@ burnout_camera_drive/
 ├── README.md                   # Full documentation & gameplay guide
 ├── controller/
 │   ├── __init__.py
-│   ├── camera.py               # Background capture thread, virtual wheel HUD & telemetry
-│   ├── hand_tracking.py        # Dual-hand MediaPipe landmark detector with EMA smoothing
-│   ├── gesture_detection.py    # Gesture classifier, hysteresis, and anti-flutter debouncing
+│   ├── notebook_tracking.py    # OpenCV notebook detector, 4-corner sorter, rotation & EMA smoothing
+│   ├── camera.py               # Background capture thread, notebook tracking HUD & telemetry
+│   ├── hand_tracking.py        # Dual-hand MediaPipe landmark detector & right index gesture logic
+│   ├── gesture_detection.py    # Simultaneous notebook steering & right index acceleration evaluator
 │   ├── keyboard_control.py     # DirectInput SendInput engine with safety tracking & practice mode
-│   ├── calibration.py          # Smart guided range calibration, presets & validation
+│   ├── calibration.py          # 4-step notebook wizard, guided range calibration, presets & validation
 │   └── session_stats.py        # Local session statistics and interruption logger
 ├── ui/
 │   ├── __init__.py
-│   ├── main_window.py          # CustomTkinter dashboard, virtual wheel HUD, and telemetry
-│   └── settings.py             # Advanced settings, presets, gesture triggers & validation
+│   ├── main_window.py          # CustomTkinter dashboard, notebook telemetry & calibration controls
+│   └── settings.py             # Advanced settings, notebook deadzone sliders & color profiles
 ├── assets/
 │   ├── app_icon.png            # Application graphic
 │   ├── app_icon.ico            # Windows executable icon
 │   └── hand_landmarker.task    # Bundled MediaPipe hand model
 └── tests/
-    └── test_controllers.py     # 13 automated unit & safety tests
+    └── test_controllers.py     # 26 automated unit, safety, notebook & gesture tests
 ```
 
 ---
 
 ## ⚖️ License & Privacy
-- **Local Privacy**: All processing runs locally on CPU using MediaPipe and OpenCV. No video, images, or telemetry are ever sent to external servers.
+- **Local Privacy**: All processing runs 100% locally on CPU using MediaPipe and OpenCV. No video, images, or telemetry are ever sent to external servers.
 - Free for personal gaming and educational use.
