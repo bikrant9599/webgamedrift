@@ -62,9 +62,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "notebook_brake_pitch_thresh": 9.0, # degrees of forward tilt to trigger brake
     "notebook_brake_height_thresh": 0.10, # foreshortening drop ratio to trigger brake
     "notebook_brake_sensitivity": 1.0,
-    "notebook_hsv_lower": [7, 75, 120],  # Orange notebook bounds
-    "notebook_hsv_upper": [28, 255, 255],
-    "notebook_color_name": "Orange",
+    "notebook_hsv_lower": [5, 50, 60],  # Orange notebook bounds (tolerant of dim room lighting)
+    "notebook_hsv_upper": [30, 255, 255],
+    "notebook_color_name": "Orange (Default)",
     "notebook_calibrated": True,
 
     # Hand parameters
@@ -173,6 +173,32 @@ class CalibrationManager:
         self.save()
         logger.info(f"Applied steering preset: {preset_data['preset_name']}")
         return True
+
+    def recenter_steering(self, nb_data=None, hand_data=None) -> str:
+        """
+        Immediately recenters steering to the current physical notebook or hand position.
+        Allows instant 1-click recalibration during gameplay without a multi-step wizard.
+        """
+        if nb_data is not None and nb_data.is_detected:
+            self.config["notebook_neutral_angle"] = round(float(nb_data.raw_angle), 1)
+            self.config["notebook_neutral_pitch"] = round(float(nb_data.raw_pitch), 1)
+            self.config["notebook_calibrated"] = True
+            self.save()
+            msg = f"Notebook Centered! (Neutral: {nb_data.raw_angle:+.1f}°)"
+            logger.info(msg)
+            return msg
+        elif hand_data is not None and hand_data.is_detected:
+            if hand_data.is_two_handed:
+                self.config["neutral_angle"] = round(float(hand_data.wheel_angle), 1)
+            self.config["neutral_x"] = round(float(hand_data.hand_center[0]), 3)
+            self.config["neutral_y"] = round(float(hand_data.hand_center[1]), 3)
+            self.config["is_calibrated"] = True
+            self.save()
+            msg = f"Hands Centered! (Center X: {hand_data.hand_center[0]:.2f})"
+            logger.info(msg)
+            return msg
+        else:
+            return "No notebook or hand visible to center"
 
     # -----------------------------------------------------------------
     # NOTEBOOK CALIBRATION WIZARD

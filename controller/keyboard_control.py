@@ -17,7 +17,7 @@ import sys
 import time
 import threading
 import logging
-from typing import Set, Dict, Optional, List
+from typing import Set, Dict, Optional, List, Tuple
 
 logger = logging.getLogger("burnout.keyboard")
 
@@ -39,6 +39,35 @@ SCAN_CODES = {
     "enter": (0x1C, False),
     "shift": (0x2A, False),
     "ctrl": (0x1D, False),
+}
+
+VK_CODES = {
+    "up": 0x26,
+    "down": 0x28,
+    "left": 0x25,
+    "right": 0x27,
+    "w": 0x57,
+    "s": 0x53,
+    "a": 0x41,
+    "d": 0x44,
+    "space": 0x20,
+    "escape": 0x1B,
+    "enter": 0x0D,
+    "shift": 0x10,
+    "ctrl": 0x11,
+}
+
+SCAN_TO_VK = {
+    (0x48, True): 0x26,  # up
+    (0x50, True): 0x28,  # down
+    (0x4B, True): 0x25,  # left
+    (0x4D, True): 0x27,  # right
+    (0x11, False): 0x57, # w
+    (0x1F, False): 0x53, # s
+    (0x1E, False): 0x41, # a
+    (0x20, False): 0x44, # d
+    (0x39, False): 0x20, # space
+    (0x01, False): 0x1B, # escape
 }
 
 IS_WINDOWS = sys.platform.startswith("win")
@@ -234,23 +263,39 @@ class KeyboardController:
         with self._lock:
             return set(self._active_keys)
 
-    def _send_win_key(self, scan_code: int, extended: bool, is_down: bool) -> bool:
-        """Send DirectInput scancode via ctypes SendInput."""
+    def _send_win_key(self, scan_code: int, extended: bool, is_down: bool, key_name: str = "") -> bool:
+        """Send DirectInput scancode via ctypes SendInput with NumLock fix and VK support."""
         if self.practice_mode:
             return True  # Practice mode: suppress actual OS key injection
 
         if not IS_WINDOWS or not user32:
             return False
         try:
+            vk = VK_CODES.get(key_name, 0)
+            if not vk:
+                vk = SCAN_TO_VK.get((scan_code, extended), 0)
+
+            extra = ctypes.c_ulong(0)
+
+            # If extended key (e.g. arrow keys) and NumLock is ON, send 0xE0 prefix
+            # This prevents Windows from converting Up/Down/Left/Right into Numpad 8/2/4/6
+            if extended and (user32.GetKeyState(0x90) & 1):
+                p_flags = KEYEVENTF_SCANCODE
+                if not is_down:
+                    p_flags |= KEYEVENTF_KEYUP
+                ii_p = Input_I()
+                ii_p.ki = KeyBdInput(0, 0xE0, p_flags, 0, ctypes.pointer(extra))
+                xp = Input(ctypes.c_ulong(INPUT_KEYBOARD), ii_p)
+                user32.SendInput(1, ctypes.pointer(xp), ctypes.sizeof(xp))
+
             flags = KEYEVENTF_SCANCODE
             if extended:
                 flags |= KEYEVENTF_EXTENDEDKEY
             if not is_down:
                 flags |= KEYEVENTF_KEYUP
 
-            extra = ctypes.c_ulong(0)
             ii_ = Input_I()
-            ii_.ki = KeyBdInput(0, scan_code, flags, 0, ctypes.pointer(extra))
+            ii_.ki = KeyBdInput(vk, scan_code, flags, 0, ctypes.pointer(extra))
             x = Input(ctypes.c_ulong(INPUT_KEYBOARD), ii_)
             user32.SendInput(1, ctypes.pointer(x), ctypes.sizeof(x))
             return True
@@ -265,7 +310,7 @@ class KeyboardController:
         key_name = key_name.lower().strip()
         if key_name in SCAN_CODES:
             code, ext = SCAN_CODES[key_name]
-            if self._send_win_key(code, ext, is_down=True):
+            if self._send_win_key(code, ext, is_down=True, key_name=key_name):
                 return
 
         if pydirectinput_available:
@@ -288,7 +333,7 @@ class KeyboardController:
         key_name = key_name.lower().strip()
         if key_name in SCAN_CODES:
             code, ext = SCAN_CODES[key_name]
-            if self._send_win_key(code, ext, is_down=False):
+            if self._send_win_key(code, ext, is_down=False, key_name=key_name):
                 return
 
         if pydirectinput_available:
@@ -321,14 +366,31 @@ class KeyboardController:
         with self._lock:
             self.release_all_internal()
 
+    def is_game_window_focused(self) -> bool:
+        """Returns True if the active foreground window is the browser game."""
+        title = get_foreground_window_title().lower()
+        if not title:
+            return False
+        return any(keyword.lower() in title for keyword in self.allowed_focus_keywords)
+
+    def get_focus_status(self) -> Tuple[bool, str]:
+        """Returns (is_focused, display_message) regarding the game window focus."""
+        title = get_foreground_window_title()
+        if not title:
+            return False, "NO ACTIVE WINDOW"
+        is_focused = any(keyword.lower() in title.lower() for keyword in self.allowed_focus_keywords)
+        if is_focused:
+            short_title = (title[:22] + "...") if len(title) > 25 else title
+            return True, f"FOCUSED ({short_title})"
+        else:
+            short_title = (title[:20] + "...") if len(title) > 23 else title
+            return False, f"CLICK GAME TO FOCUS ({short_title})"
+
     def check_focus_safety(self) -> bool:
         """Returns True if the target window is focused or if focus checking is disabled."""
         if not self.check_focus:
             return True
-        title = get_foreground_window_title().lower()
-        if not title:
-            return True
-        return any(keyword.lower() in title for keyword in self.allowed_focus_keywords)
+        return self.is_game_window_focused()
 
     def apply_actions(self, desired_actions: Dict[str, bool]) -> None:
         """

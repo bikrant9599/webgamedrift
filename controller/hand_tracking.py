@@ -232,41 +232,35 @@ class HandTracker:
         # -------------------------------------------------------------
         # ACCURATE PHYSICAL RIGHT VS LEFT HAND IDENTIFICATION
         # -------------------------------------------------------------
-        # In a mirrored selfie feed (mirror=True):
-        # - The user's actual right hand is positioned on the right side of the screen (x > 0.5 or rightmost x).
-        # - The user's actual left hand is on the left side of the screen (x < 0.5 or leftmost x).
-        # In an unmirrored feed (mirror=False):
-        # - The user's actual right hand is on screen left (x < 0.5).
         right_hand_raw = None
         left_hand_raw = None
 
         if len(detected_hands_raw) >= 2:
-            cx0 = float(np.mean(detected_hands_raw[0][[0, 5, 9, 17], 0]))
-            cx1 = float(np.mean(detected_hands_raw[1][[0, 5, 9, 17], 0]))
+            h0, lbl0 = detected_hands_raw[0], (detected_labels[0] if len(detected_labels) > 0 else "")
+            h1, lbl1 = detected_hands_raw[1], (detected_labels[1] if len(detected_labels) > 1 else "")
 
-            if mirror:
-                # Rightmost is user's physical Right hand in mirrored view
-                if cx0 < cx1:
-                    left_hand_raw = detected_hands_raw[0]
-                    right_hand_raw = detected_hands_raw[1]
-                else:
-                    left_hand_raw = detected_hands_raw[1]
-                    right_hand_raw = detected_hands_raw[0]
+            h0_is_right = self._is_anatomical_right_hand(h0, lbl0, mirror)
+            h1_is_right = self._is_anatomical_right_hand(h1, lbl1, mirror)
+
+            if h0_is_right and not h1_is_right:
+                right_hand_raw = h0
+                left_hand_raw = h1
+            elif h1_is_right and not h0_is_right:
+                right_hand_raw = h1
+                left_hand_raw = h0
             else:
-                # Leftmost is user's physical Right hand in unmirrored view
-                if cx0 < cx1:
-                    right_hand_raw = detected_hands_raw[0]
-                    left_hand_raw = detected_hands_raw[1]
+                # Fallback to spatial position if labels are ambiguous
+                cx0 = float(np.mean(h0[[0, 5, 9, 17], 0]))
+                cx1 = float(np.mean(h1[[0, 5, 9, 17], 0]))
+                if mirror:
+                    left_hand_raw, right_hand_raw = (h0, h1) if cx0 < cx1 else (h1, h0)
                 else:
-                    right_hand_raw = detected_hands_raw[1]
-                    left_hand_raw = detected_hands_raw[0]
+                    right_hand_raw, left_hand_raw = (h0, h1) if cx0 < cx1 else (h1, h0)
 
         elif len(detected_hands_raw) == 1:
             h0 = detected_hands_raw[0]
-            cx = float(np.mean(h0[[0, 5, 9, 17], 0]))
-            # Determine if right or left
-            is_right = (cx >= 0.50) if mirror else (cx <= 0.50)
-            if is_right:
+            lbl0 = detected_labels[0] if len(detected_labels) > 0 else ""
+            if self._is_anatomical_right_hand(h0, lbl0, mirror):
                 right_hand_raw = h0
             else:
                 left_hand_raw = h0
@@ -377,6 +371,43 @@ class HandTracker:
 
         hand_data.fingers_extended = self._detect_extended_fingers(self._smoothed_landmarks)
         return frame_bgr, hand_data
+
+    def _is_anatomical_right_hand(self, landmarks: np.ndarray, mp_label: str, mirror: bool) -> bool:
+        """
+        Determines if a hand is anatomically the user's physical Right hand.
+        Uses MediaPipe's anatomical classification, verified with palm normal and thumb vector.
+        Works anywhere on screen, even if the right hand crosses over to the left side.
+        """
+        if mp_label:
+            # In mirrored selfie view (flipped horizontally), MediaPipe sees a mirrored reflection,
+            # so physical Right hand is classified as 'Left' by MP, and vice versa.
+            expected_for_phys_right = "Left" if mirror else "Right"
+            if mp_label.strip().lower() == expected_for_phys_right.lower():
+                return True
+            elif mp_label.strip().lower() in ("left", "right"):
+                return False
+
+        # Fallback to anatomical thumb/palm vector check:
+        # Landmarks: 0=wrist, 5=index_mcp, 17=pinky_mcp, 4=thumb_tip
+        try:
+            wrist = landmarks[0, :2]
+            index_mcp = landmarks[5, :2]
+            pinky_mcp = landmarks[17, :2]
+            thumb_tip = landmarks[4, :2]
+
+            up_vec = index_mcp - wrist
+            palm_across = pinky_mcp - index_mcp
+            cross_z = up_vec[0] * palm_across[1] - up_vec[1] * palm_across[0]
+            thumb_vec = thumb_tip - index_mcp
+            thumb_left = thumb_vec[0] < 0
+
+            if cross_z > 0:  # Palm facing camera
+                return thumb_left if mirror else (not thumb_left)
+            else:  # Back of hand facing camera
+                return (not thumb_left) if mirror else thumb_left
+        except Exception:
+            # Fallback to screen position if coordinates invalid
+            return float(landmarks[0, 0]) > 0.5 if mirror else float(landmarks[0, 0]) < 0.5
 
     def _is_index_finger_raised(self, landmarks: np.ndarray, h: int, w: int) -> bool:
         """

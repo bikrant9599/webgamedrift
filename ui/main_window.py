@@ -25,6 +25,7 @@ from controller.calibration import CalibrationManager
 from controller.keyboard_control import KeyboardController
 from controller.session_stats import SessionTracker
 from ui.settings import SettingsWindow
+from ui.mini_hud import MiniHUDWindow
 
 logger = logging.getLogger("burnout.main_window")
 
@@ -83,6 +84,7 @@ class MainWindow(ctk.CTk):
         # Driving state
         self.is_driving = False
         self.is_practice_mode = False
+        self.mini_hud: Optional[MiniHUDWindow] = None
         self._is_closing = False
         self._loop_after_id = None
 
@@ -218,8 +220,18 @@ class MainWindow(ctk.CTk):
             command=self._on_rearm_click
         )
         self.rearm_banner_btn.pack(side="right", padx=8, pady=5)
-        # Hidden by default
         self.rearm_banner.pack_forget()
+
+        # Game Window Focus Alert Banner (shown when driving is active but browser is not clicked)
+        self.focus_banner = ctk.CTkFrame(self.left_col, fg_color="#3D2900", corner_radius=8, height=36)
+        self.focus_banner_lbl = ctk.CTkLabel(
+            self.focus_banner,
+            text="⚠️ CLICK BROWSER GAME WINDOW TO FOCUS — Keyboard inputs require active browser focus!",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#FFB800"
+        )
+        self.focus_banner_lbl.pack(side="left", padx=12, pady=6)
+        self.focus_banner.pack_forget()
 
         # Video Frame Container
         self.video_box = ctk.CTkFrame(self.left_col, fg_color="#0B0C0E", corner_radius=8)
@@ -287,6 +299,19 @@ class MainWindow(ctk.CTk):
         ctrl_card = ctk.CTkFrame(self.right_col, fg_color=BG_CARD_INNER, corner_radius=10)
         ctrl_card.pack(fill="x", padx=8, pady=(2, 8))
 
+        # Hero Play Now Button (1-Click Play & Launch)
+        self.play_now_btn = ctk.CTkButton(
+            ctrl_card,
+            text="🎮 1-CLICK PLAY NOW (LAUNCH GAME)",
+            fg_color="#0077BE",
+            hover_color="#0090E0",
+            text_color=TEXT_WHITE,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            height=42,
+            command=self._on_play_now
+        )
+        self.play_now_btn.pack(fill="x", padx=12, pady=(10, 5))
+
         self.start_btn = ctk.CTkButton(
             ctrl_card,
             text="▶ START DRIVING",
@@ -297,7 +322,7 @@ class MainWindow(ctk.CTk):
             height=44,
             command=self._on_start_driving
         )
-        self.start_btn.pack(fill="x", padx=12, pady=(10, 5))
+        self.start_btn.pack(fill="x", padx=12, pady=(2, 5))
 
         self.stop_btn = ctk.CTkButton(
             ctrl_card,
@@ -306,10 +331,38 @@ class MainWindow(ctk.CTk):
             hover_color="#363C4E",
             text_color=TEXT_MUTED,
             font=ctk.CTkFont(size=12, weight="bold"),
-            height=36,
+            height=34,
             command=self._on_stop_driving
         )
-        self.stop_btn.pack(fill="x", padx=12, pady=(0, 10))
+        self.stop_btn.pack(fill="x", padx=12, pady=(0, 6))
+
+        # Recenter and Mini HUD controls row
+        aux_row = ctk.CTkFrame(ctrl_card, fg_color="transparent")
+        aux_row.pack(fill="x", padx=12, pady=(0, 10))
+
+        self.recenter_btn = ctk.CTkButton(
+            aux_row,
+            text="🎯 Recenter Wheel",
+            fg_color="#183D50",
+            hover_color="#235874",
+            text_color=ACCENT_CYAN,
+            font=ctk.CTkFont(size=11, weight="bold"),
+            height=32,
+            command=self._on_recenter_steering
+        )
+        self.recenter_btn.pack(side="left", padx=(0, 3), expand=True, fill="x")
+
+        self.mini_hud_btn = ctk.CTkButton(
+            aux_row,
+            text="🗗 Mini HUD Mode",
+            fg_color="#232731",
+            hover_color="#2E3544",
+            text_color=TEXT_WHITE,
+            font=ctk.CTkFont(size=11, weight="bold"),
+            height=32,
+            command=self._on_open_mini_hud
+        )
+        self.mini_hud_btn.pack(side="right", padx=(3, 0), expand=True, fill="x")
 
         # 2. SENSITIVITY PRESETS ROW (1-CLICK)
         self._create_panel_header(self.right_col, "STEERING SENSITIVITY PRESETS")
@@ -370,6 +423,7 @@ class MainWindow(ctk.CTk):
         self.tracking_status_lbl = self._create_telemetry_row(telem_card, "Hand Tracking:", "SEARCHING...", ACCENT_AMBER)
         self.notebook_status_lbl = self._create_telemetry_row(telem_card, "Notebook Wheel:", "SEARCHING...", ACCENT_AMBER)
         self.right_index_lbl = self._create_telemetry_row(telem_card, "Right Index Finger:", "LOWERED", TEXT_MUTED)
+        self.game_focus_lbl = self._create_telemetry_row(telem_card, "Game Window Focus:", "CHECKING...", ACCENT_AMBER)
         self.gesture_lbl = self._create_telemetry_row(telem_card, "Current Gesture:", "IDLE", TEXT_WHITE)
         self.throttle_lbl = self._create_telemetry_row(telem_card, "Acceleration:", "RELEASED", TEXT_MUTED)
         self.brake_lbl = self._create_telemetry_row(telem_card, "Braking Status:", "RELEASED", TEXT_MUTED)
@@ -397,21 +451,33 @@ class MainWindow(ctk.CTk):
         self.calib_msg_lbl = ctk.CTkLabel(calib_card, text="Status: Ready to calibrate", font=ctk.CTkFont(size=11, weight="bold"), text_color=ACCENT_GREEN)
         self.calib_msg_lbl.pack(padx=12, pady=(0, 6), anchor="w")
 
-        # Row 1 of calibration: Notebook Calibration Wizard
+        # Row 1 of calibration: Notebook Calibration Wizard & Color Sampler
         calib_nb_row = ctk.CTkFrame(calib_card, fg_color="transparent")
         calib_nb_row.pack(fill="x", padx=10, pady=(2, 4))
 
         self.calib_notebook_btn = ctk.CTkButton(
             calib_nb_row,
-            text="📓 CALIBRATE NOTEBOOK (5-STEP WIZARD)",
+            text="📓 5-STEP WIZARD",
             fg_color="#D97706",
             hover_color="#F59E0B",
             text_color="#000000",
-            font=ctk.CTkFont(size=12, weight="bold"),
+            font=ctk.CTkFont(size=11, weight="bold"),
             height=34,
             command=self._on_start_notebook_calibration
         )
-        self.calib_notebook_btn.pack(fill="x")
+        self.calib_notebook_btn.pack(side="left", padx=(0, 4), expand=True, fill="x")
+
+        self.sample_color_btn = ctk.CTkButton(
+            calib_nb_row,
+            text="🎨 Sample Color",
+            fg_color="#183D50",
+            hover_color="#235874",
+            text_color=ACCENT_CYAN,
+            font=ctk.CTkFont(size=11, weight="bold"),
+            height=34,
+            command=self._on_sample_notebook_color
+        )
+        self.sample_color_btn.pack(side="right", padx=(4, 0), expand=True, fill="x")
 
         # Row 2 of calibration: Quick Hand & Guided Hand buttons
         calib_btn_row = ctk.CTkFrame(calib_card, fg_color="transparent")
@@ -567,8 +633,52 @@ class MainWindow(ctk.CTk):
         )
         logger.info(f"Notebook steering toggled: {status_str}")
 
+    def _on_play_now(self):
+        """
+        One-Click Play workflow:
+        1. Opens Burnout Drift Hilltop in browser.
+        2. Prepares camera & tracking.
+        3. Instructs user on exact steps to drive safely.
+        """
+        self._on_open_game()
+        self.calib_msg_lbl.configure(
+            text="Game opened! Hold notebook/hands, click ▶ START DRIVING, then click into game canvas!",
+            text_color=ACCENT_CYAN
+        )
+        logger.info("One-Click Play Now executed.")
+
+    def _on_recenter_steering(self):
+        """1-click instantaneous recentering of notebook or hand neutral position."""
+        if self.camera_thread:
+            _, _, hand, nb, _, _ = self.camera_thread.get_latest_snapshot()
+            msg = self.calibration.recenter_steering(nb_data=nb, hand_data=hand)
+            self.calib_msg_lbl.configure(text=msg, text_color=ACCENT_GREEN)
+            logger.info(f"Steering recentered: {msg}")
+
+    def _on_open_mini_hud(self):
+        """Launches floating always-on-top Mini HUD and minimizes main dashboard."""
+        if self.mini_hud and self.mini_hud.winfo_exists():
+            self.mini_hud.lift()
+            return
+
+        self.mini_hud = MiniHUDWindow(
+            parent=self,
+            on_recenter_cb=self._on_recenter_steering,
+            on_stop_cb=self._on_stop_driving,
+            on_expand_cb=self._on_restore_from_mini_hud
+        )
+        self.iconify()
+        logger.info("Mini Floating HUD opened.")
+
+    def _on_restore_from_mini_hud(self):
+        """Restores main window from Mini HUD."""
+        self.deiconify()
+        self.lift()
+        self.focus_force()
+
     def _on_start_driving(self):
         self.is_driving = True
+        self.keyboard_ctrl.check_focus = True
         self.keyboard_ctrl.set_enabled(True)
         self.keyboard_ctrl.rearm_driving()
         self.session_tracker.record_driving_state(True)
@@ -585,6 +695,7 @@ class MainWindow(ctk.CTk):
         self.start_btn.configure(fg_color="#00A86B", text="▶ START DRIVING")
         self.stop_btn.configure(fg_color="#2A2F3D", text_color=TEXT_MUTED)
         self.rearm_banner.pack_forget()
+        self.focus_banner.pack_forget()
         logger.info("Driving stopped by user.")
 
     def _on_emergency_stop(self):
@@ -595,6 +706,7 @@ class MainWindow(ctk.CTk):
         self.stop_btn.configure(fg_color="#2A2F3D", text_color=TEXT_MUTED)
         self.gesture_lbl.configure(text="EMERGENCY STOPPED", text_color=ACCENT_RED)
         self.rearm_banner.pack_forget()
+        self.focus_banner.pack_forget()
         logger.warning("Emergency Stop Triggered.")
 
     def _on_rearm_click(self):
@@ -610,7 +722,15 @@ class MainWindow(ctk.CTk):
 
     def _on_start_notebook_calibration(self):
         self.calibration.start_notebook_calibration()
-        self.calib_notebook_btn.configure(text="📓 Calibrating Notebook...", state="disabled")
+        self.calib_notebook_btn.configure(text="📓 Calibrating...", state="disabled")
+
+    def _on_sample_notebook_color(self):
+        if self.camera_thread:
+            ok, msg = self.camera_thread.sample_notebook_color()
+            self.calib_msg_lbl.configure(
+                text=msg,
+                text_color=ACCENT_GREEN if ok else ACCENT_RED
+            )
 
     def _on_start_quick_calibration(self):
         self.calibration.start_quick_calibration()
@@ -823,17 +943,37 @@ class MainWindow(ctk.CTk):
                     self.calib_msg_lbl.configure(text=f"Notebook Calibrated (Neutral: {neutral:+.1f}°)", text_color=ACCENT_GREEN)
                 else:
                     self.calib_msg_lbl.configure(text="Neutral Centered & Calibrated", text_color=ACCENT_GREEN)
-                self.calib_notebook_btn.configure(text="📓 CALIBRATE NOTEBOOK (5-STEP WIZARD)", state="normal")
+                self.calib_notebook_btn.configure(text="📓 5-STEP WIZARD", state="normal")
                 self.calib_quick_btn.configure(text="🎯 Quick Hand (2.5s)", state="normal")
                 self.calib_guided_btn.configure(text="📐 Hand Range (3-Step)", state="normal")
 
-            # 10. Safety Re-Arm Banner check
+            # 10. Game Window Focus Check & Warnings
+            is_game_focused, focus_str = self.keyboard_ctrl.get_focus_status()
+            if is_game_focused:
+                self.game_focus_lbl.configure(text=focus_str, text_color=ACCENT_GREEN)
+            else:
+                self.game_focus_lbl.configure(text=focus_str, text_color=ACCENT_RED if self.is_driving else ACCENT_AMBER)
+
+            # Focus Warning Banner under video
+            if self.is_driving and not self.is_practice_mode and not self.keyboard_ctrl.is_interrupted:
+                if not is_game_focused:
+                    self.focus_banner.pack(fill="x", padx=10, pady=(6, 2), before=self.video_box)
+                else:
+                    self.focus_banner.pack_forget()
+            else:
+                self.focus_banner.pack_forget()
+
+            # 11. Safety Re-Arm Banner check
             if self.keyboard_ctrl.is_interrupted and self.is_driving and not self.is_practice_mode:
                 self.rearm_banner.pack(fill="x", padx=10, pady=(6, 2), before=self.video_box)
             else:
                 self.rearm_banner.pack_forget()
 
-            # 11. Live Session Stats Update
+            # 12. Mini Floating HUD sync
+            if self.mini_hud and self.mini_hud.winfo_exists():
+                self.mini_hud.update_telemetry(state, is_game_focused, self.is_driving)
+
+            # 13. Live Session Stats Update
             live_stats = self.session_tracker.get_live_stats()
             self.sess_timer_lbl.configure(text=live_stats["elapsed_str"])
             self.sess_driving_lbl.configure(text=live_stats["driving_time_str"])
@@ -848,6 +988,11 @@ class MainWindow(ctk.CTk):
         if getattr(self, '_loop_after_id', None):
             try:
                 self.after_cancel(self._loop_after_id)
+            except Exception:
+                pass
+        if self.mini_hud and self.mini_hud.winfo_exists():
+            try:
+                self.mini_hud.destroy()
             except Exception:
                 pass
         self.session_tracker.end_session()

@@ -81,6 +81,7 @@ class CameraThread(threading.Thread):
         # Telemetry & latest state
         self.is_connected = False
         self.latest_frame_pil: Optional[Image.Image] = None
+        self._latest_raw_bgr: Optional[np.ndarray] = None
         self.current_state = DrivingState()
         self.current_hand = HandData()
         self.current_notebook = NotebookData()
@@ -129,6 +130,9 @@ class CameraThread(threading.Thread):
                     self.keyboard_ctrl.notify_tracking_interrupted("Camera disconnected")
                     self.session_tracker.record_tracking_status(False, self.keyboard_ctrl.is_enabled())
                     continue
+
+            with self._lock:
+                self._latest_raw_bgr = frame_bgr.copy()
 
             # Process hand tracking with mirror view
             processed_bgr, hand_data = self.hand_tracker.process_frame(frame_bgr, mirror=True)
@@ -230,6 +234,20 @@ class CameraThread(threading.Thread):
                 self.fps_actual,
                 self.is_connected
             )
+
+    def sample_notebook_color(self) -> Tuple[bool, str]:
+        """Samples center region of latest frame to adaptively calibrate HSV bounds for any notebook."""
+        with self._lock:
+            frame = self._latest_raw_bgr.copy() if self._latest_raw_bgr is not None else None
+        if frame is None:
+            return False, "No camera frame available yet"
+
+        lower, upper = self.notebook_tracker.calibrate_color_from_roi(frame)
+        self.calibration.config["notebook_hsv_lower"] = list(lower)
+        self.calibration.config["notebook_hsv_upper"] = list(upper)
+        self.calibration.config["notebook_color_name"] = "Custom Sampled"
+        self.calibration.save()
+        return True, f"Color Sampled! (Hue {lower[0]}-{upper[0]})"
 
     def _generate_disconnected_frame(self) -> np.ndarray:
         img = np.zeros((self.target_height, self.target_width, 3), dtype=np.uint8)

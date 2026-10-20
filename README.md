@@ -75,10 +75,10 @@ Click **`📓 CALIBRATE NOTEBOOK (5-STEP WIZARD)`** to launch the comprehensive 
 ### 7. 🧪 Practice Mode
 - **Zero-Risk Testing**: Toggle `🎯 PRACTICE MODE: ON` to test notebook rotation and finger gestures with live visual HUD feedback without sending any keystrokes to Windows.
 
-### 8. 📊 Session Statistics & Privacy
-- **Live Metrics**: Shows active session duration, net driving time, and tracking interruptions count.
-- **Local History**: Records summary metrics for your last 25 sessions in `session_history.json`.
-- **100% Private**: **No webcam images or personal data are ever uploaded, saved, or transmitted**.
+### 9. 🚀 One-Click Play Now & Mini HUD Overlay
+- **`🎮 1-CLICK PLAY NOW`**: Opens Burnout Drift Hilltop in your default browser, initializes camera and AI tracking, displays live game window focus status, and guides you to click Start Driving when ready.
+- **`🗗 Mini HUD Mode`**: Compact always-on-top dashboard window you can keep floating over the game canvas while playing, displaying live steering gauge, gas/brake/drift badges, game focus detection, and quick Recenter/Stop controls.
+- **`🎯 Recenter Wheel`**: 1-click neutral steering alignment anytime without repeating the full calibration wizard.
 
 ---
 
@@ -117,28 +117,28 @@ python main.py
 ## 🕹️ Quick Play Guide
 
 1. **Launch App**: Run `python main.py`.
-2. **Hold Notebook**: Hold your orange notebook horizontally with both hands like a steering wheel.
-3. **Calibrate**: Click **`📓 CALIBRATE NOTEBOOK WHEEL (4-STEP)`** and follow the on-screen prompts.
-4. **Open Game**: Click **`🌐 OPEN GAME`** in the top bar to launch [Burnout Drift Hilltop](https://poki.com/en/g/burnout-drift-hilltop).
-5. **Focus Browser Canvas**: **Click once inside the game screen** in Chrome/Edge to give it keyboard focus.
-6. **Start Driving**: Click **`▶ START DRIVING`** (or toggle **Practice Mode** first to test).
+2. **Hold Notebook**: Hold your orange notebook horizontally with both hands in front of the camera like a steering wheel.
+3. **One-Click Play**: Click **`🎮 1-CLICK PLAY NOW`** in the top bar to automatically launch [Burnout Drift: Hilltop](https://poki.com/en/g/burnout-drift-hilltop) in your browser.
+4. **Recenter / Calibrate**: Hold your notebook level and click **`🎯 Recenter Wheel`** (or click **`📓 CALIBRATE NOTEBOOK WHEEL (5-STEP)`** for full calibration).
+5. **Focus Browser Canvas**: Click inside the game canvas in Chrome or Edge so the green "GAME FOCUSED" banner appears.
+6. **Start Driving**: Click **`▶ START DRIVING`** (or switch to **`🗗 Mini HUD Mode`** to keep a floating HUD over the game).
 7. **Drive**:
    - Rotate notebook clockwise to steer right; counter-clockwise to steer left.
-   - Raise right index finger to accelerate.
+   - Raise your **right index finger** ☝️ to accelerate (lower it to stop).
+   - Tilt notebook forward 📐 or form a fist ✊ to brake.
    - Flash a **Peace Sign** ✌️ to pop the handbrake into high-speed drifts!
-   - Form a **Fist** ✊ to brake before tight turns.
-   - Press <kbd>Escape</kbd> for Emergency Stop.
+   - Press <kbd>Escape</kbd> anytime for Emergency Stop.
 
 ---
 
 ## 🧪 Automated Test Suite
 
-Run the full suite of 26 unit & safety tests:
+Run the full suite of 37 unit, safety, and integration tests:
 ```powershell
-python tests/test_controllers.py
+python -m unittest discover -s tests
 ```
 ```
-Ran 26 tests in 0.226s
+Ran 37 tests in 6.162s
 OK
 ```
 
@@ -157,21 +157,22 @@ webgamedrift/
 │   ├── __init__.py
 │   ├── notebook_tracking.py    # OpenCV notebook detector, 4-corner sorter, rotation & EMA smoothing
 │   ├── camera.py               # Background capture thread, notebook tracking HUD & telemetry
-│   ├── hand_tracking.py        # Dual-hand MediaPipe landmark detector & right index gesture logic
+│   ├── hand_tracking.py        # Dual-hand MediaPipe landmark detector & anatomical right index gesture logic
 │   ├── gesture_detection.py    # Simultaneous notebook steering & right index acceleration evaluator
-│   ├── keyboard_control.py     # DirectInput SendInput engine with safety tracking & practice mode
-│   ├── calibration.py          # 4-step notebook wizard, guided range calibration, presets & validation
+│   ├── keyboard_control.py     # DirectInput SendInput engine with safety tracking, window focus, & practice mode
+│   ├── calibration.py          # 5-step notebook wizard, guided range calibration, instant recentering & presets
 │   └── session_stats.py        # Local session statistics and interruption logger
 ├── ui/
 │   ├── __init__.py
-│   ├── main_window.py          # CustomTkinter dashboard, notebook telemetry & calibration controls
+│   ├── main_window.py          # CustomTkinter dashboard, 1-Click Play, notebook telemetry & calibration controls
+│   ├── mini_hud.py             # Always-on-top floating mini HUD window with live steering gauge & controls
 │   └── settings.py             # Advanced settings, notebook deadzone sliders & color profiles
 ├── assets/
 │   ├── app_icon.png            # Application graphic
 │   ├── app_icon.ico            # Windows executable icon
 │   └── hand_landmarker.task    # Bundled MediaPipe hand model
 └── tests/
-    └── test_controllers.py     # 26 automated unit, safety, notebook & gesture tests
+    └── test_controllers.py     # 37 automated unit, safety, notebook, focus & gesture tests
 ```
 
 ---

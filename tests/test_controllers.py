@@ -602,6 +602,23 @@ class TestCombinedSteeringAndAcceleration(unittest.TestCase):
         self.assertFalse(state.brake)
         self.assertEqual(state.steering_val, 0.0)
 
+    def test_seamless_hand_steering_fallback_when_notebook_not_detected(self):
+        # Notebook is NOT detected, but user tilts hands to steer left
+        nb_undetected = NotebookData(is_detected=False)
+        hand = HandData(
+            is_detected=True,
+            is_two_handed=True,
+            wheel_angle=-25.0, # tilted left
+            hand_center=(0.5, 0.5),
+            hand_size=0.20
+        )
+        state = self.detector.evaluate(hand, notebook_data=nb_undetected)
+        # Should seamlessly fall back to hand steering instead of returning 0
+        self.assertFalse(state.notebook_active)
+        self.assertTrue(state.steer_left)
+        self.assertFalse(state.steer_right)
+        self.assertLess(state.steering_val, 0.0)
+
 
 class TestNotebookCalibrationWizard(unittest.TestCase):
     def setUp(self):
@@ -699,6 +716,65 @@ class TestNotebookCalibrationWizard(unittest.TestCase):
         self.assertEqual(self.calib.calibration_phase, "idle")
         self.assertIn("Rejected", msg)
         self.assertIsNotNone(self.calib.calibration_warning)
+
+
+class TestOneClickPlayRecenterAndFocus(unittest.TestCase):
+    def setUp(self):
+        self.test_cfg = "test_recenter_cfg.json"
+        self.calib = CalibrationManager(filepath=self.test_cfg)
+        self.kb = KeyboardController()
+        self.kb.set_enabled(False)
+
+    def tearDown(self):
+        if os.path.exists(self.test_cfg):
+            try:
+                os.remove(self.test_cfg)
+            except Exception:
+                pass
+        self.kb.release_all()
+
+    def test_recenter_steering_with_notebook(self):
+        nb = NotebookData(is_detected=True, raw_angle=7.5, raw_pitch=3.2)
+        hand = HandData(is_detected=False)
+        msg = self.calib.recenter_steering(nb_data=nb, hand_data=hand)
+        self.assertIn("Notebook Centered", msg)
+        self.assertAlmostEqual(self.calib.config["notebook_neutral_angle"], 7.5)
+        self.assertAlmostEqual(self.calib.config["notebook_neutral_pitch"], 3.2)
+        self.assertTrue(self.calib.config["notebook_calibrated"])
+
+    def test_recenter_steering_with_hands(self):
+        nb = NotebookData(is_detected=False)
+        hand = HandData(is_detected=True, is_two_handed=True, wheel_angle=4.2, hand_center=(0.48, 0.52))
+        msg = self.calib.recenter_steering(nb_data=nb, hand_data=hand)
+        self.assertIn("Hands Centered", msg)
+        self.assertAlmostEqual(self.calib.config["neutral_x"], 0.48)
+        self.assertAlmostEqual(self.calib.config["neutral_angle"], 4.2)
+        self.assertTrue(self.calib.config["is_calibrated"])
+
+    def test_is_game_window_focused(self):
+        # When foreground contains a browser or Poki keyword
+        self.kb.allowed_focus_keywords = ["TestKeyword", "Burnout", "Poki"]
+        # Check method runs without error
+        status_bool, status_str = self.kb.get_focus_status()
+        self.assertIsInstance(status_bool, bool)
+        self.assertIsInstance(status_str, str)
+
+    def test_anatomical_right_hand_classification(self):
+        from controller.hand_tracking import HandTracker
+        tracker = HandTracker()
+
+        # Mirrored feed: MediaPipe 'Left' label corresponds to physical Right hand
+        dummy_lm = np.zeros((21, 3), dtype=np.float32)
+        is_phys_right = tracker._is_anatomical_right_hand(dummy_lm, mp_label="Left", mirror=True)
+        self.assertTrue(is_phys_right)
+
+        # Mirrored feed: MediaPipe 'Right' label corresponds to physical Left hand
+        is_phys_right_2 = tracker._is_anatomical_right_hand(dummy_lm, mp_label="Right", mirror=True)
+        self.assertFalse(is_phys_right_2)
+
+        # Unmirrored feed: MediaPipe 'Right' label is physical Right hand
+        is_phys_right_unmirrored = tracker._is_anatomical_right_hand(dummy_lm, mp_label="Right", mirror=False)
+        self.assertTrue(is_phys_right_unmirrored)
 
 
 if __name__ == "__main__":

@@ -163,7 +163,7 @@ class GestureDetector:
             self._right_index_counter = 0
 
         # Fallback to gesture accel mode if right-hand index finger is not used
-        if not is_accel_candidate and not use_notebook and hand.is_detected:
+        if not is_accel_candidate and (not (notebook and notebook.is_detected)) and hand.is_detected:
             accel_mode = self.calib.config.get("accel_mode", "forward_push")
             if self._check_acceleration_fallback(hand, accel_mode):
                 self._accel_counter += 1
@@ -206,12 +206,14 @@ class GestureDetector:
         # -------------------------------------------------------------
         # 4. STEERING: NOTEBOOK OR HANDS
         # -------------------------------------------------------------
-        if use_notebook and notebook is not None:
+        if use_notebook and notebook is not None and notebook.is_detected:
             state.notebook_active = True
             raw_steering_val, steer_left, steer_right = self._compute_notebook_steering(notebook)
         elif hand.is_detected:
+            state.notebook_active = False
             raw_steering_val, steer_left, steer_right = self._compute_hand_steering(hand)
         else:
+            state.notebook_active = False
             raw_steering_val, steer_left, steer_right = 0.0, False, False
 
         # Anti-flutter direction debounce

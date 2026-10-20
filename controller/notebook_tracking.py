@@ -202,10 +202,10 @@ class NotebookTracker:
             edge_candidates = []
             for ec in edge_cnts:
                 area = cv2.contourArea(ec)
-                if (0.025 * frame_area) <= area <= (0.60 * frame_area):
+                if (0.015 * frame_area) <= area <= (0.65 * frame_area):
                     peri = cv2.arcLength(ec, True)
                     approx = cv2.approxPolyDP(ec, 0.04 * peri, True)
-                    if len(approx) in (4, 5, 6) and cv2.isContourConvex(approx):
+                    if 4 <= len(approx) <= 8:
                         score = self._score_candidate_contour(ec, w, h, hand_roi)
                         edge_candidates.append((score, area, ec))
 
