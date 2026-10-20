@@ -72,11 +72,27 @@ Click **`📓 CALIBRATE NOTEBOOK (5-STEP WIZARD)`** to launch the comprehensive 
 - **Anti-Auto-Resume Protection**: If tracking is lost while driving, the system pauses keyboard simulation and displays a safety banner. Throttle will NEVER automatically resume until you click `RESUME DRIVING`.
 - **Window Focus Safety**: Automatically pauses keyboard simulation when switching away from the browser.
 
-### 7. 🧪 Practice Mode
-- **Zero-Risk Testing**: Toggle `🎯 PRACTICE MODE: ON` to test notebook rotation and finger gestures with live visual HUD feedback without sending any keystrokes to Windows.
+### 7. 🧪 Safe Practice & Test Input Modes
+- **`🧪 TEST INPUT (SAFE FIELD)`**: Dedicated in-app interactive test box to verify index finger acceleration, notebook steering, and braking keys live inside the controller before launching the game.
+- **`🎯 PRACTICE MODE`**: Visual gesture HUD feedback with OS key emission disabled.
 
-### 9. 🚀 One-Click Play Now & Mini HUD Overlay
+### 8. 📊 Keyboard & System Diagnostic Panel
+Real-time live telemetry display of all 11 critical driving states:
+1. `HAND DETECTED`: YES / NO
+2. `RIGHT HAND CONFIDENCE`: Percentage & handedness
+3. `INDEX FINGER`: UP (Gas active) / DOWN (Coast)
+4. `ACCELERATION`: ACTIVE / INACTIVE
+5. `NOTEBOOK DETECTED`: YES / NO
+6. `NOTEBOOK ANGLE`: Rotation & forward pitch degrees
+7. `STEERING`: LEFT / CENTER / RIGHT
+8. `BRAKING`: ACTIVE / INACTIVE
+9. `GAME FOCUS`: YES / NO (Active browser window)
+10. `KEYBOARD EVENT`: Last hardware event dispatched (VK code & scan code)
+11. `ACTIVE KEYS`: Hardware keys currently held down
+
+### 9. 🚀 One-Click Play Now, Focus Control & Mini HUD Overlay
 - **`🎮 1-CLICK PLAY NOW`**: Opens Burnout Drift Hilltop in your default browser, initializes camera and AI tracking, displays live game window focus status, and guides you to click Start Driving when ready.
+- **`🎯 FOCUS EDGE GAME`**: 1-click focus button that cleanly brings Microsoft Edge to the foreground without stealing focus continuously.
 - **`🗗 Mini HUD Mode`**: Compact always-on-top dashboard window you can keep floating over the game canvas while playing, displaying live steering gauge, gas/brake/drift badges, game focus detection, and quick Recenter/Stop controls.
 - **`🎯 Recenter Wheel`**: 1-click neutral steering alignment anytime without repeating the full calibration wizard.
 
@@ -118,9 +134,9 @@ python main.py
 
 1. **Launch App**: Run `python main.py`.
 2. **Hold Notebook**: Hold your orange notebook horizontally with both hands in front of the camera like a steering wheel.
-3. **One-Click Play**: Click **`🎮 1-CLICK PLAY NOW`** in the top bar to automatically launch [Burnout Drift: Hilltop](https://poki.com/en/g/burnout-drift-hilltop) in your browser.
+3. **One-Click Play**: Click **`🎮 1-CLICK PLAY NOW`** in the top bar to automatically launch [Burnout Drift: Hilltop](https://poki.com/en/g/burnout-drift-hilltop) in Microsoft Edge / Chrome.
 4. **Recenter / Calibrate**: Hold your notebook level and click **`🎯 Recenter Wheel`** (or click **`📓 CALIBRATE NOTEBOOK WHEEL (5-STEP)`** for full calibration).
-5. **Focus Browser Canvas**: Click inside the game canvas in Chrome or Edge so the green "GAME FOCUSED" banner appears.
+5. **Focus Browser Canvas**: Click inside the game canvas in Edge so the banner turns green (`GAME FOCUSED`), or click **`🎯 FOCUS EDGE GAME`**.
 6. **Start Driving**: Click **`▶ START DRIVING`** (or switch to **`🗗 Mini HUD Mode`** to keep a floating HUD over the game).
 7. **Drive**:
    - Rotate notebook clockwise to steer right; counter-clockwise to steer left.
@@ -133,12 +149,12 @@ python main.py
 
 ## 🧪 Automated Test Suite
 
-Run the full suite of 37 unit, safety, and integration tests:
+Run the full suite of 40 unit, safety, keyboard simulation, and integration tests:
 ```powershell
 python -m unittest discover -s tests
 ```
 ```
-Ran 37 tests in 6.162s
+Ran 40 tests in 0.396s
 OK
 ```
 

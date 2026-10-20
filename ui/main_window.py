@@ -231,6 +231,18 @@ class MainWindow(ctk.CTk):
             text_color="#FFB800"
         )
         self.focus_banner_lbl.pack(side="left", padx=12, pady=6)
+
+        self.focus_banner_btn = ctk.CTkButton(
+            self.focus_banner,
+            text="🎯 FOCUS EDGE NOW",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color=ACCENT_BLUE,
+            hover_color="#0090E0",
+            width=140,
+            height=26,
+            command=self._on_focus_game_click
+        )
+        self.focus_banner_btn.pack(side="right", padx=8, pady=5)
         self.focus_banner.pack_forget()
 
         # Video Frame Container
@@ -414,20 +426,73 @@ class MainWindow(ctk.CTk):
         )
         self.notebook_mode_btn.pack(fill="x")
 
-        # 3. LIVE TELEMETRY CARD
-        self._create_panel_header(self.right_col, "LIVE SYSTEM TELEMETRY")
+        # 3. KEYBOARD & SYSTEM DIAGNOSTIC PANEL (STEP 6)
+        self._create_panel_header(self.right_col, "KEYBOARD & SYSTEM DIAGNOSTIC PANEL")
         telem_card = ctk.CTkFrame(self.right_col, fg_color=BG_CARD_INNER, corner_radius=10)
-        telem_card.pack(fill="x", padx=8, pady=(2, 8))
+        telem_card.pack(fill="x", padx=8, pady=(2, 6))
 
-        self.cam_status_lbl = self._create_telemetry_row(telem_card, "Camera Feed:", "CHECKING...", ACCENT_AMBER)
-        self.tracking_status_lbl = self._create_telemetry_row(telem_card, "Hand Tracking:", "SEARCHING...", ACCENT_AMBER)
-        self.notebook_status_lbl = self._create_telemetry_row(telem_card, "Notebook Wheel:", "SEARCHING...", ACCENT_AMBER)
-        self.right_index_lbl = self._create_telemetry_row(telem_card, "Right Index Finger:", "LOWERED", TEXT_MUTED)
-        self.game_focus_lbl = self._create_telemetry_row(telem_card, "Game Window Focus:", "CHECKING...", ACCENT_AMBER)
-        self.gesture_lbl = self._create_telemetry_row(telem_card, "Current Gesture:", "IDLE", TEXT_WHITE)
-        self.throttle_lbl = self._create_telemetry_row(telem_card, "Acceleration:", "RELEASED", TEXT_MUTED)
-        self.brake_lbl = self._create_telemetry_row(telem_card, "Braking Status:", "RELEASED", TEXT_MUTED)
-        self.fps_lbl = self._create_telemetry_row(telem_card, "Engine FPS:", "0.0 FPS", ACCENT_BLUE)
+        # 11 Live Diagnostic States (Step 6)
+        self.diag_hand_detected_lbl = self._create_telemetry_row(telem_card, "HAND DETECTED:", "NO", ACCENT_AMBER)
+        self.diag_hand_conf_lbl = self._create_telemetry_row(telem_card, "RIGHT HAND CONFIDENCE:", "0%", TEXT_MUTED)
+        self.diag_index_finger_lbl = self._create_telemetry_row(telem_card, "INDEX FINGER:", "DOWN", TEXT_MUTED)
+        self.diag_accel_lbl = self._create_telemetry_row(telem_card, "ACCELERATION:", "INACTIVE", TEXT_MUTED)
+        self.diag_nb_detected_lbl = self._create_telemetry_row(telem_card, "NOTEBOOK DETECTED:", "NO", ACCENT_AMBER)
+        self.diag_nb_angle_lbl = self._create_telemetry_row(telem_card, "NOTEBOOK ANGLE:", "0.0°", TEXT_MUTED)
+        self.diag_steering_lbl = self._create_telemetry_row(telem_card, "STEERING:", "CENTER", TEXT_MUTED)
+        self.diag_brake_lbl = self._create_telemetry_row(telem_card, "BRAKING:", "INACTIVE", TEXT_MUTED)
+        self.diag_game_focus_lbl = self._create_telemetry_row(telem_card, "GAME FOCUS:", "NO", ACCENT_AMBER)
+        self.diag_kb_event_lbl = self._create_telemetry_row(telem_card, "KEYBOARD EVENT:", "NONE", ACCENT_CYAN)
+        self.diag_active_keys_lbl = self._create_telemetry_row(telem_card, "ACTIVE KEYS:", "NONE", TEXT_WHITE)
+
+        # Compatibility aliases
+        self.cam_status_lbl = self.diag_hand_detected_lbl
+        self.tracking_status_lbl = self.diag_hand_detected_lbl
+        self.notebook_status_lbl = self.diag_nb_detected_lbl
+        self.right_index_lbl = self.diag_index_finger_lbl
+        self.game_focus_lbl = self.diag_game_focus_lbl
+        self.gesture_lbl = self.diag_accel_lbl
+        self.throttle_lbl = self.diag_accel_lbl
+        self.brake_lbl = self.diag_brake_lbl
+        self.fps_lbl = self._create_telemetry_row(telem_card, "ENGINE FPS:", "0.0 FPS", ACCENT_BLUE)
+
+        # Test Input & Game Focus Card
+        test_card = ctk.CTkFrame(self.right_col, fg_color=BG_CARD_INNER, corner_radius=10)
+        test_card.pack(fill="x", padx=8, pady=(2, 6))
+
+        test_btn_row = ctk.CTkFrame(test_card, fg_color="transparent")
+        test_btn_row.pack(fill="x", padx=10, pady=(6, 4))
+
+        self.test_input_btn = ctk.CTkButton(
+            test_btn_row,
+            text="🧪 TEST INPUT (SAFE FIELD)",
+            fg_color="#183D50",
+            hover_color="#235874",
+            text_color=ACCENT_CYAN,
+            font=ctk.CTkFont(size=11, weight="bold"),
+            height=30,
+            command=self._toggle_test_input
+        )
+        self.test_input_btn.pack(side="left", padx=(0, 4), expand=True, fill="x")
+
+        self.focus_game_btn = ctk.CTkButton(
+            test_btn_row,
+            text="🎯 FOCUS EDGE GAME",
+            fg_color="#103B5C",
+            hover_color="#185685",
+            text_color=TEXT_WHITE,
+            font=ctk.CTkFont(size=11, weight="bold"),
+            height=30,
+            command=self._on_focus_game_click
+        )
+        self.focus_game_btn.pack(side="right", padx=(4, 0), expand=True, fill="x")
+
+        self.test_input_box = ctk.CTkEntry(
+            test_card,
+            placeholder_text="Click here and raise index finger ☝️ or turn notebook to test keys safely...",
+            font=ctk.CTkFont(family="Consolas", size=10),
+            height=28
+        )
+        self.test_input_box.pack(fill="x", padx=10, pady=(0, 6))
 
         # 4. SMART CALIBRATION WIZARD CARD
         self._create_panel_header(self.right_col, "SMART CALIBRATION WIZARD")
@@ -714,6 +779,45 @@ class MainWindow(ctk.CTk):
         self.rearm_banner.pack_forget()
         logger.info("User re-armed driving after interruption.")
 
+    def _on_focus_game_click(self):
+        """Brings the Microsoft Edge / Poki browser window to the foreground once."""
+        success, msg = self.keyboard_ctrl.find_and_focus_game_window()
+        if success:
+            self.calib_msg_lbl.configure(text=f"✔ {msg}", text_color=ACCENT_GREEN)
+            self.focus_banner.pack_forget()
+            logger.info(f"Game window focused: {msg}")
+        else:
+            self.calib_msg_lbl.configure(text=f"⚠️ {msg}", text_color=ACCENT_AMBER)
+            logger.warning(f"Could not focus game window: {msg}")
+
+    def _toggle_test_input(self):
+        """Safely tests keyboard simulation in application field before starting game."""
+        self.is_test_mode = not getattr(self, 'is_test_mode', False)
+        self.keyboard_ctrl.set_test_mode(self.is_test_mode)
+
+        if self.is_test_mode:
+            self.test_input_btn.configure(text="⏹ STOP TEST INPUT", fg_color=ACCENT_RED, hover_color="#FF4D79")
+            self.keyboard_ctrl.set_enabled(True)
+            self.keyboard_ctrl.rearm_driving()
+            self.test_input_box.delete(0, "end")
+            self.test_input_box.insert(0, "TEST ACTIVE: Raise index finger ☝️ or turn notebook...")
+            self.test_input_box.focus_set()
+            self.calib_msg_lbl.configure(
+                text="🧪 TEST MODE ACTIVE: Try gestures now! Keys are simulated into the test field.",
+                text_color=ACCENT_CYAN
+            )
+            logger.info("Test input mode started.")
+        else:
+            self.test_input_btn.configure(text="🧪 TEST INPUT (SAFE FIELD)", fg_color="#183D50", hover_color="#235874")
+            self.keyboard_ctrl.release_all()
+            if not self.is_driving:
+                self.keyboard_ctrl.set_enabled(False)
+            self.calib_msg_lbl.configure(
+                text="Test mode stopped. Ready to play!",
+                text_color=ACCENT_GREEN
+            )
+            logger.info("Test input mode stopped.")
+
     def _on_open_game(self):
         try:
             webbrowser.open(GAME_URL)
@@ -838,67 +942,95 @@ class MainWindow(ctk.CTk):
             else:
                 self.cam_status_lbl.configure(text="DISCONNECTED", text_color=ACCENT_RED)
 
-            # 3. Hand & Notebook Tracking Status & Indicators
+            # 3. 11 Real-Time Diagnostic States (Step 6)
+            # 1) HAND DETECTED: YES / NO
             if hand.is_detected:
-                if hand.is_two_handed:
-                    self.tracking_status_lbl.configure(text="LOCKED [2 HANDS WHEEL]", text_color=ACCENT_GREEN)
-                elif hand.is_fallback:
-                    self.tracking_status_lbl.configure(text="LOCKED [1-HAND FALLBACK]", text_color=ACCENT_CYAN)
-                else:
-                    self.tracking_status_lbl.configure(text=f"LOCKED ({hand.handedness})", text_color=ACCENT_GREEN)
+                self.diag_hand_detected_lbl.configure(text="YES", text_color=ACCENT_GREEN)
             else:
-                self.tracking_status_lbl.configure(text="SEARCHING HAND...", text_color=ACCENT_AMBER)
+                self.diag_hand_detected_lbl.configure(text="NO", text_color=ACCENT_AMBER)
 
-            # Notebook Wheel Status
-            if nb and nb.is_detected:
-                nb_rot_str = f"{nb.rotation_angle:+.1f}°"
-                self.notebook_status_lbl.configure(text=f"LOCKED ({nb_rot_str})", text_color=ACCENT_GREEN)
-            else:
-                self.notebook_status_lbl.configure(text="SEARCHING NOTEBOOK...", text_color=ACCENT_AMBER)
-
-            # Right Index Finger Status
-            if hand.right_index_raised:
-                self.right_index_lbl.configure(text="▲ RAISED (GAS ACTIVE)", text_color=ACCENT_GREEN)
+            # 2) RIGHT HAND CONFIDENCE: percentage
+            conf_pct = int(hand.confidence * 100) if hand.is_detected else 0
+            if hand.is_detected and hand.right_hand_detected:
+                self.diag_hand_conf_lbl.configure(text=f"{conf_pct}% (Right Hand)", text_color=ACCENT_GREEN)
             elif hand.is_detected:
-                self.right_index_lbl.configure(text="LOWERED (COAST)", text_color=TEXT_MUTED)
+                self.diag_hand_conf_lbl.configure(text=f"{conf_pct}% (Left Hand)", text_color=ACCENT_CYAN)
             else:
-                self.right_index_lbl.configure(text="SEARCHING HAND...", text_color=TEXT_MUTED)
+                self.diag_hand_conf_lbl.configure(text="0%", text_color=TEXT_MUTED)
 
-            # 4. Gesture Name
-            self.gesture_lbl.configure(text=state.gesture_name)
-            if state.brake:
-                self.gesture_lbl.configure(text_color=ACCENT_RED)
-            elif state.accelerate:
-                self.gesture_lbl.configure(text_color=ACCENT_GREEN)
-            elif state.handbrake:
-                self.gesture_lbl.configure(text_color="#FF66CC")
+            # 3) INDEX FINGER: UP / DOWN
+            if hand.right_index_raised:
+                self.diag_index_finger_lbl.configure(text="UP (☝️ RAISED)", text_color=ACCENT_GREEN)
+            elif hand.is_detected:
+                self.diag_index_finger_lbl.configure(text="DOWN (LOWERED)", text_color=TEXT_MUTED)
             else:
-                self.gesture_lbl.configure(text_color=TEXT_WHITE)
+                self.diag_index_finger_lbl.configure(text="DOWN (NO HAND)", text_color=TEXT_MUTED)
 
-            # 5. Throttle & Brake
-            self.throttle_lbl.configure(
-                text="ACTIVE (100%)" if state.accelerate else "RELEASED",
-                text_color=ACCENT_GREEN if state.accelerate else TEXT_MUTED
-            )
-            if state.brake:
-                if nb and nb.is_detected and nb.is_braking:
-                    self.brake_lbl.configure(
-                        text=f"ACTIVE (PITCH {nb.pitch_angle:+.1f}°)",
-                        text_color=ACCENT_RED
-                    )
-                else:
-                    self.brake_lbl.configure(text="ACTIVE (DOWN ARROW)", text_color=ACCENT_RED)
+            # 4) ACCELERATION: ACTIVE / INACTIVE
+            if state.accelerate:
+                self.diag_accel_lbl.configure(text="ACTIVE (GAS 100%)", text_color=ACCENT_GREEN)
             else:
-                p_info = f" (Pitch {nb.pitch_angle:+.1f}°)" if (nb and nb.is_detected) else ""
-                self.brake_lbl.configure(
-                    text=f"RELEASED{p_info}",
-                    text_color=TEXT_MUTED
+                self.diag_accel_lbl.configure(text="INACTIVE (COAST)", text_color=TEXT_MUTED)
+
+            # 5) NOTEBOOK DETECTED: YES / NO
+            if nb and nb.is_detected:
+                self.diag_nb_detected_lbl.configure(text="YES (LOCKED)", text_color=ACCENT_GREEN)
+                self.diag_nb_angle_lbl.configure(
+                    text=f"{nb.rotation_angle:+.1f}° (Pitch {nb.pitch_angle:+.1f}°)",
+                    text_color=ACCENT_CYAN
+                )
+            else:
+                self.diag_nb_detected_lbl.configure(text="NO (SEARCHING)", text_color=ACCENT_AMBER)
+                self.diag_nb_angle_lbl.configure(text="0.0°", text_color=TEXT_MUTED)
+
+            # 6) STEERING: LEFT / CENTER / RIGHT
+            if state.steer_left:
+                pct = int(abs(state.steering_val) * 100)
+                self.diag_steering_lbl.configure(text=f"LEFT ({pct}%)", text_color=ACCENT_BLUE)
+            elif state.steer_right:
+                pct = int(abs(state.steering_val) * 100)
+                self.diag_steering_lbl.configure(text=f"RIGHT ({pct}%)", text_color=ACCENT_BLUE)
+            else:
+                self.diag_steering_lbl.configure(text="CENTER", text_color=TEXT_MUTED)
+
+            # 7) BRAKING: ACTIVE / INACTIVE
+            if state.brake:
+                brk_type = "NOTEBOOK PITCH" if (nb and nb.is_detected and nb.is_braking) else "FIST"
+                self.diag_brake_lbl.configure(text=f"ACTIVE ({brk_type})", text_color=ACCENT_RED)
+            else:
+                self.diag_brake_lbl.configure(text="INACTIVE", text_color=TEXT_MUTED)
+
+            # 8) GAME FOCUS: YES / NO
+            is_game_focused, focus_str = self.keyboard_ctrl.get_focus_status()
+            if is_game_focused:
+                self.diag_game_focus_lbl.configure(text=f"YES ({focus_str})", text_color=ACCENT_GREEN)
+            else:
+                self.diag_game_focus_lbl.configure(
+                    text=f"NO ({focus_str})",
+                    text_color=ACCENT_RED if self.is_driving else ACCENT_AMBER
                 )
 
-            # 6. FPS
+            # 9) KEYBOARD EVENT: last event sent
+            last_ev = self.keyboard_ctrl.get_last_event()
+            self.diag_kb_event_lbl.configure(text=last_ev)
+
+            # 10) ACTIVE KEYS: actual keys held by the controller
+            active_keys = self.keyboard_ctrl.get_active_keys()
+            active_str = ", ".join(sorted(list(active_keys))).upper() if active_keys else "NONE"
+            self.diag_active_keys_lbl.configure(
+                text=active_str,
+                text_color=ACCENT_GREEN if active_keys else TEXT_MUTED
+            )
+
+            # Live Test Input Box Update in Test Mode
+            if getattr(self, 'is_test_mode', False) and active_keys:
+                self.test_input_box.delete(0, "end")
+                self.test_input_box.insert(0, f"ACTIVE KEYS: {active_str} | {last_ev}")
+
+            # 4. Engine FPS
             self.fps_lbl.configure(text=f"{fps:.1f} FPS")
 
-            # 7. Steering Gauge
+            # 5. Steering Gauge
             prog_val = (state.steering_val + 1.0) / 2.0
             self.steer_prog.set(max(0.0, min(1.0, prog_val)))
 
@@ -911,13 +1043,12 @@ class MainWindow(ctk.CTk):
             else:
                 self.steer_deg_lbl.configure(text="CENTER (DEADZONE)", text_color=TEXT_MUTED)
 
-            # 8. Active Badges
-            active_keys = self.keyboard_ctrl.get_active_keys()
+            # 6. Active Badges
             mapping = self.keyboard_ctrl.get_mapping()
 
             for action_key, badge in self.key_badges.items():
                 mapped_physical = mapping.get(action_key, "")
-                is_active = (mapped_physical in active_keys) and (self.is_driving or self.is_practice_mode)
+                is_active = (mapped_physical in active_keys) and (self.is_driving or self.is_practice_mode or getattr(self, 'is_test_mode', False))
 
                 if is_active:
                     if action_key == "brake":

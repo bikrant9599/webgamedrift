@@ -182,9 +182,11 @@ class CalibrationManager:
         if nb_data is not None and nb_data.is_detected:
             self.config["notebook_neutral_angle"] = round(float(nb_data.raw_angle), 1)
             self.config["notebook_neutral_pitch"] = round(float(nb_data.raw_pitch), 1)
+            self.config["notebook_neutral_height"] = round(float(nb_data.height), 1)
+            self.config["notebook_neutral_width"] = round(float(nb_data.width), 1)
             self.config["notebook_calibrated"] = True
             self.save()
-            msg = f"Notebook Centered! (Neutral: {nb_data.raw_angle:+.1f}°)"
+            msg = f"Notebook Centered! (Neutral: {nb_data.raw_angle:+.1f}°, Pitch: {nb_data.raw_pitch:+.1f}°)"
             logger.info(msg)
             return msg
         elif hand_data is not None and hand_data.is_detected:

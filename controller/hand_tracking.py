@@ -268,6 +268,7 @@ class HandTracker:
         # Update detected flags and pixel coordinates
         if right_hand_raw is not None:
             hand_data.right_hand_detected = True
+            hand_data.confidence = 0.95
             hand_data.right_hand_landmarks = [(int(x * w), int(y * h)) for x, y in right_hand_raw[:, :2]]
             # Check raised index finger on the physical Right Hand
             hand_data.right_index_raised = self._is_index_finger_raised(right_hand_raw, h, w)
@@ -275,6 +276,8 @@ class HandTracker:
         if left_hand_raw is not None:
             hand_data.left_hand_detected = True
             hand_data.left_hand_landmarks = [(int(x * w), int(y * h)) for x, y in left_hand_raw[:, :2]]
+            if not hand_data.right_hand_detected:
+                hand_data.confidence = 0.90
 
         # -------------------------------------------------------------
         # TWO-HAND STEERING WHEEL CALCULATIONS

@@ -119,13 +119,24 @@ class GestureDetector:
                 is_brake_raw = True
                 is_notebook_brake = True
         elif hand.is_detected:
-            is_brake_raw = self._check_brake(hand, brake_type)
-            is_handbrake_raw = self._check_handbrake(hand, handbrake_type)
+            # Only evaluate hand brake if right index finger is NOT raised
+            if not hand.right_index_raised:
+                is_brake_raw = self._check_brake(hand, brake_type)
+                is_handbrake_raw = self._check_handbrake(hand, handbrake_type)
 
-            if hand.is_two_handed and hand.second_fingers_extended:
-                ext2 = hand.second_fingers_extended
-                if (not ext2[1]) and (not ext2[2]) and (not ext2[3]) and (not ext2[4]):
-                    is_brake_raw = True
+                if hand.is_two_handed and hand.second_fingers_extended:
+                    ext1 = hand.fingers_extended
+                    ext2 = hand.second_fingers_extended
+                    # Two-handed fist brake requires BOTH hands to be clenched fists
+                    if len(ext1) >= 5 and len(ext2) >= 5:
+                        fist1 = (not ext1[1]) and (not ext1[2]) and (not ext1[3]) and (not ext1[4])
+                        fist2 = (not ext2[1]) and (not ext2[2]) and (not ext2[3]) and (not ext2[4])
+                        if fist1 and fist2:
+                            is_brake_raw = True
+
+        # If right index finger is raised, override hand brake to allow clean gas acceleration
+        if hand.right_index_raised and not is_notebook_brake:
+            is_brake_raw = False
 
         if is_brake_raw:
             self._brake_counter += 1

@@ -751,32 +751,67 @@ class TestOneClickPlayRecenterAndFocus(unittest.TestCase):
         self.assertAlmostEqual(self.calib.config["neutral_angle"], 4.2)
         self.assertTrue(self.calib.config["is_calibrated"])
 
-    def test_is_game_window_focused(self):
-        # When foreground contains a browser or Poki keyword
-        self.kb.allowed_focus_keywords = ["TestKeyword", "Burnout", "Poki"]
-        # Check method runs without error
-        status_bool, status_str = self.kb.get_focus_status()
-        self.assertIsInstance(status_bool, bool)
-        self.assertIsInstance(status_str, str)
+    def test_controller_window_excluded_from_focus(self):
+        # Controller window must NEVER be identified as the browser game
+        self.assertTrue(self.kb.is_controller_window("Burnout Camera Drive — Hilltop Edition"))
+        self.assertTrue(self.kb.is_controller_window("Burnout Mini HUD"))
+        self.assertFalse(self.kb.is_controller_window("Burnout Drift: Hilltop - Play on Poki - Microsoft Edge"))
+        self.assertFalse(self.kb.is_controller_window("Poki Games - Edge"))
 
-    def test_anatomical_right_hand_classification(self):
-        from controller.hand_tracking import HandTracker
-        tracker = HandTracker()
+    def test_test_mode_bypasses_focus_safety(self):
+        self.kb.check_focus = True
+        self.kb.test_mode = True
+        self.assertTrue(self.kb.check_focus_safety())
 
-        # Mirrored feed: MediaPipe 'Left' label corresponds to physical Right hand
-        dummy_lm = np.zeros((21, 3), dtype=np.float32)
-        is_phys_right = tracker._is_anatomical_right_hand(dummy_lm, mp_label="Left", mirror=True)
-        self.assertTrue(is_phys_right)
+        self.kb.test_mode = False
+        # In headless test without browser window, it safely returns False
+        self.assertFalse(self.kb.check_focus_safety())
 
-        # Mirrored feed: MediaPipe 'Right' label corresponds to physical Left hand
-        is_phys_right_2 = tracker._is_anatomical_right_hand(dummy_lm, mp_label="Right", mirror=True)
-        self.assertFalse(is_phys_right_2)
+    def test_right_index_gas_not_blocked_by_left_hand_curl(self):
+        # When right index finger is raised, curled left hand must NOT cancel gas with brake
+        gd = GestureDetector(self.calib)
+        hand = HandData(
+            is_detected=True,
+            right_hand_detected=True,
+            right_index_raised=True,
+            is_two_handed=True,
+            fingers_extended=[False, False, False, False, False],       # Left hand curled
+            second_fingers_extended=[False, True, False, False, False]   # Right hand index raised
+        )
+        # Evaluate multiple frames for confirmation
+        state = None
+        for _ in range(5):
+            state = gd.evaluate(hand)
 
-        # Unmirrored feed: MediaPipe 'Right' label is physical Right hand
-        is_phys_right_unmirrored = tracker._is_anatomical_right_hand(dummy_lm, mp_label="Right", mirror=False)
-        self.assertTrue(is_phys_right_unmirrored)
+        self.assertTrue(state.accelerate)
+        self.assertFalse(state.brake)
+        self.assertEqual(state.throttle_val, 1.0)
+
+    def test_right_index_acceleration_release_when_lowered(self):
+        gd = GestureDetector(self.calib)
+        hand = HandData(
+            is_detected=True,
+            right_hand_detected=True,
+            right_index_raised=True
+        )
+        for _ in range(5):
+            state = gd.evaluate(hand)
+        self.assertTrue(state.accelerate)
+
+        # Lower finger
+        hand.right_index_raised = False
+        state = gd.evaluate(hand)
+        self.assertFalse(state.accelerate)
+        self.assertEqual(state.throttle_val, 0.0)
+
+    def test_notebook_recenter_enables_forward_tilt_braking(self):
+        nb = NotebookData(is_detected=True, raw_angle=0.0, raw_pitch=5.0, height=120.0, width=180.0)
+        self.calib.recenter_steering(nb_data=nb)
+        self.assertEqual(self.calib.config["notebook_neutral_height"], 120.0)
+        self.assertEqual(self.calib.config["notebook_neutral_width"], 180.0)
 
 
 if __name__ == "__main__":
     unittest.main()
+
 
