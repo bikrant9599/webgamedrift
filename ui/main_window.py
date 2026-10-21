@@ -702,15 +702,17 @@ class MainWindow(ctk.CTk):
         """
         One-Click Play workflow:
         1. Opens Burnout Drift Hilltop in browser.
-        2. Prepares camera & tracking.
-        3. Instructs user on exact steps to drive safely.
+        2. Automatically activates driving controller.
+        3. Attempts to focus browser and instructs user on exact steps.
         """
         self._on_open_game()
+        self._on_start_driving()
+        self.after(1200, self._on_focus_game_click)
         self.calib_msg_lbl.configure(
-            text="Game opened! Hold notebook/hands, click ▶ START DRIVING, then click into game canvas!",
-            text_color=ACCENT_CYAN
+            text="🎮 DRIVING ACTIVE! Click inside the browser game window once to focus, then drive!",
+            text_color=ACCENT_GREEN
         )
-        logger.info("One-Click Play Now executed.")
+        logger.info("One-Click Play Now executed with driving activated.")
 
     def _on_recenter_steering(self):
         """1-click instantaneous recentering of notebook or hand neutral position."""

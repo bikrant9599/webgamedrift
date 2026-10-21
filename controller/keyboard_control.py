@@ -195,8 +195,22 @@ class KeyboardController:
             "brake": "down",
             "handbrake": "space",
         }
+        # Dual key dispatch for maximum WebGL browser compatibility (both Arrows and WASD)
+        self.dual_wasd_enabled = True
+        self.dual_pairs = {
+            "up": "w",
+            "down": "s",
+            "left": "a",
+            "right": "d",
+            "w": "up",
+            "s": "down",
+            "a": "left",
+            "d": "right",
+        }
         self.check_focus = False
-        self.allowed_focus_keywords = ["Burnout", "Poki", "Chrome", "Edge", "Firefox", "Opera", "Brave"]
+        self.allowed_focus_keywords = [
+            "Burnout", "Poki", "Hilltop", "Drift", "Chrome", "Edge", "Firefox", "Opera", "Brave", "Unity", "WebGL"
+        ]
 
     def set_mapping(self, mapping: Dict[str, str]) -> None:
         """Update action-to-key mapping."""
@@ -414,7 +428,7 @@ class KeyboardController:
 
             extra = ctypes.c_ulong(0)
             ii = Input_I()
-            ii.ki = KeyBdInput(vk, scan_code, si_flags, 0, ctypes.pointer(extra))
+            ii.ki = KeyBdInput(0, scan_code, si_flags, 0, ctypes.pointer(extra))
             inp = Input(ctypes.c_ulong(INPUT_KEYBOARD), ii)
             user32.SendInput(1, ctypes.pointer(inp), ctypes.sizeof(inp))
         except Exception as e:
@@ -520,6 +534,14 @@ class KeyboardController:
             if left_key in desired_keys and right_key in desired_keys:
                 desired_keys.remove(left_key)
                 desired_keys.remove(right_key)
+
+            # Dual-dispatch paired keys (Arrows + WASD) for 100% browser game compatibility
+            if getattr(self, 'dual_wasd_enabled', False):
+                extra_keys = set()
+                for k in list(desired_keys):
+                    if k in self.dual_pairs:
+                        extra_keys.add(self.dual_pairs[k])
+                desired_keys.update(extra_keys)
 
             # Release keys no longer desired
             keys_to_release = self._active_keys - desired_keys
