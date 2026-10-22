@@ -339,105 +339,108 @@ class CameraThread(threading.Thread):
             (0, 17)                                 # Palm
         ]
 
-        # Draw Right Hand
-        if hand.right_hand_detected and hand.right_hand_landmarks:
-            r_pts = hand.right_hand_landmarks
-            r_color = (0, 255, 120) if hand.right_index_raised else (0, 180, 255)
+        # Draw hand skeletons
+        hands_to_draw = []
+        if hand.right_hand_landmarks:
+            hands_to_draw.append((hand.right_hand_landmarks, True))
+        if hand.left_hand_landmarks and hand.left_hand_landmarks != hand.right_hand_landmarks:
+            hands_to_draw.append((hand.left_hand_landmarks, False))
+        elif not hands_to_draw and hand.landmarks_pixel:
+            hands_to_draw.append((hand.landmarks_pixel, True))
+
+        for pts, is_right in hands_to_draw:
+            line_color = (0, 220, 255) if is_right else (255, 180, 0)
+            if state.accelerate:
+                line_color = (0, 255, 120)
+            elif state.brake:
+                line_color = (60, 60, 255)
+            elif state.handbrake:
+                line_color = (255, 120, 200)
+
             for p1_idx, p2_idx in connections:
-                if p1_idx < len(r_pts) and p2_idx < len(r_pts):
-                    cv2.line(frame, r_pts[p1_idx], r_pts[p2_idx], r_color, 2, cv2.LINE_AA)
-            for pt in r_pts:
+                if p1_idx < len(pts) and p2_idx < len(pts):
+                    cv2.line(frame, pts[p1_idx], pts[p2_idx], line_color, 2, cv2.LINE_AA)
+            for pt in pts:
                 cv2.circle(frame, pt, 3, (255, 255, 255), -1, cv2.LINE_AA)
 
-            # Highlight raised index tip with pulsating dot
-            if hand.right_index_raised and len(r_pts) > 8:
-                tip = r_pts[8]
-                cv2.circle(frame, tip, 9, (0, 255, 80), -1, cv2.LINE_AA)
-                cv2.circle(frame, tip, 13, (255, 255, 255), 2, cv2.LINE_AA)
-                cv2.putText(frame, "INDEX UP (GAS)", (tip[0] + 12, tip[1] - 8),
-                            cv2.FONT_HERSHEY_DUPLEX, 0.45, (0, 255, 120), 1, cv2.LINE_AA)
+            # Highlight gestures on finger tips
+            if state.accelerate and len(pts) > 8:
+                tip = pts[8]
+                cv2.circle(frame, tip, 10, (0, 255, 120), -1, cv2.LINE_AA)
+                cv2.circle(frame, tip, 14, (255, 255, 255), 2, cv2.LINE_AA)
+                cv2.putText(frame, "GAS (UP)", (tip[0] + 12, tip[1] - 8),
+                            cv2.FONT_HERSHEY_DUPLEX, 0.5, (0, 255, 120), 1, cv2.LINE_AA)
 
-        # Draw Left Hand
-        if hand.left_hand_detected and hand.left_hand_landmarks:
-            l_pts = hand.left_hand_landmarks
-            for p1_idx, p2_idx in connections:
-                if p1_idx < len(l_pts) and p2_idx < len(l_pts):
-                    cv2.line(frame, l_pts[p1_idx], l_pts[p2_idx], (0, 180, 255), 2, cv2.LINE_AA)
-            for pt in l_pts:
-                cv2.circle(frame, pt, 3, (255, 255, 255), -1, cv2.LINE_AA)
+            elif state.handbrake and len(pts) > 12:
+                t1, t2 = pts[8], pts[12]
+                cv2.circle(frame, t1, 8, (255, 120, 200), -1, cv2.LINE_AA)
+                cv2.circle(frame, t2, 8, (255, 120, 200), -1, cv2.LINE_AA)
+                cv2.putText(frame, "DRIFT", (t1[0] + 12, t1[1] - 8),
+                            cv2.FONT_HERSHEY_DUPLEX, 0.5, (255, 120, 200), 1, cv2.LINE_AA)
+
+            elif state.brake and len(pts) > 9:
+                center_pt = pts[9]
+                cv2.circle(frame, center_pt, 16, (60, 60, 255), 2, cv2.LINE_AA)
+                cv2.putText(frame, "BRAKE", (center_pt[0] + 12, center_pt[1] - 8),
+                            cv2.FONT_HERSHEY_DUPLEX, 0.5, (60, 60, 255), 1, cv2.LINE_AA)
 
         # -------------------------------------------------------------
-        # 3. LIVE HUD TELEMETRY CARDS
+        # 3. MODERN OVERLAY BADGE (TOP LEFT)
         # -------------------------------------------------------------
-        # Top Left Telemetry Box
-        cv2.rectangle(frame, (10, 10), (320, 125), (15, 18, 22), -1)
-        cv2.rectangle(frame, (10, 10), (320, 125), (45, 52, 65), 1)
+        if state.accelerate:
+            badge_text = "GAS ACTIVE [W / UP]"
+            badge_color = (0, 200, 80)
+        elif state.brake:
+            badge_text = "BRAKE ACTIVE [S / DOWN]"
+            badge_color = (40, 40, 230)
+        elif state.handbrake:
+            badge_text = "DRIFT ACTIVE [SPACE]"
+            badge_color = (200, 80, 180)
+        elif state.steer_left:
+            badge_text = "STEERING LEFT [A / LEFT]"
+            badge_color = (0, 180, 240)
+        elif state.steer_right:
+            badge_text = "STEERING RIGHT [D / RIGHT]"
+            badge_color = (0, 180, 240)
+        elif hand.is_detected:
+            badge_text = "COASTING (NEUTRAL)"
+            badge_color = (160, 160, 170)
+        else:
+            badge_text = "SHOW HAND IN CAMERA"
+            badge_color = (60, 140, 220)
 
-        # Line 1: State title
-        color_txt = (70, 255, 100) if state.accelerate else ((70, 70, 255) if state.brake else (255, 255, 255))
-        cv2.putText(frame, state.gesture_name, (18, 30), cv2.FONT_HERSHEY_DUPLEX, 0.46, color_txt, 1, cv2.LINE_AA)
+        # Draw semi-transparent pill for badge
+        (tw, th), _ = cv2.getTextSize(badge_text, cv2.FONT_HERSHEY_DUPLEX, 0.52, 1)
+        bx, by = 16, 16
+        bw, bh = tw + 24, th + 18
 
-        # Line 2: Notebook & Calibration status
-        cal_ok = "CALIB OK" if self.calibration.config.get("notebook_calibrated") else "UNCALIBRATED"
-        nb_status = f"Notebook: {'LOCKED' if nb.is_detected else 'SEARCHING'} | {cal_ok}"
-        cv2.putText(frame, nb_status, (18, 49), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 220, 255) if nb.is_detected else (180, 180, 190), 1, cv2.LINE_AA)
-
-        # Line 3: Steering direction & angle
-        steer_dir = "LEFT" if state.steer_left else ("RIGHT" if state.steer_right else "CENTER")
-        cv2.putText(frame, f"Steering: {steer_dir} ({nb.rotation_angle:+.1f} deg, neutral: {self.notebook_tracker.neutral_angle:.1f} deg)",
-                    (18, 68), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (200, 205, 215), 1, cv2.LINE_AA)
-
-        # Line 4: Brake & Acceleration status
-        brk_lbl = "BRAKE: ACTIVE [DOWN]" if state.brake else f"Brake: Released (Pitch {nb.pitch_angle:+.1f} deg)"
-        brk_col = (50, 70, 255) if state.brake else (140, 145, 155)
-        cv2.putText(frame, brk_lbl, (18, 87), cv2.FONT_HERSHEY_SIMPLEX, 0.36, brk_col, 1, cv2.LINE_AA)
-
-        # Line 5: Right Index finger & Active Keys
-        active_keys = sorted(list(self.keyboard_ctrl.get_active_keys()))
-        keys_str = "[" + ", ".join(k.upper() for k in active_keys) + "]" if active_keys else "[NONE]"
-        gas_lbl = f"Gas: {'ACTIVE [UP]' if state.accelerate else 'COAST'} | Keys: {keys_str}"
-        gas_col = (0, 255, 120) if state.accelerate else (140, 145, 155)
-        cv2.putText(frame, gas_lbl, (18, 106), cv2.FONT_HERSHEY_SIMPLEX, 0.36, gas_col, 1, cv2.LINE_AA)
-
-        # Calibration warning banner if present
-        if self.calibration.calibration_warning:
-            cv2.rectangle(frame, (10, h - 55), (w - 10, h - 33), (20, 20, 60), -1)
-            cv2.rectangle(frame, (10, h - 55), (w - 10, h - 33), (0, 160, 255), 1)
-            cv2.putText(frame, f"NOTE: {self.calibration.calibration_warning}", (18, h - 40),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 220, 255), 1, cv2.LINE_AA)
+        sub_img = frame[by:by+bh, bx:bx+bw]
+        rect_color = np.zeros_like(sub_img)
+        rect_color[:] = (18, 20, 26)
+        cv2.addWeighted(rect_color, 0.75, sub_img, 0.25, 0, sub_img)
+        cv2.rectangle(frame, (bx, by), (bx + bw, by + bh), badge_color, 1, cv2.LINE_AA)
+        cv2.putText(frame, badge_text, (bx + 12, by + th + 8),
+                    cv2.FONT_HERSHEY_DUPLEX, 0.52, badge_color, 1, cv2.LINE_AA)
 
         # -------------------------------------------------------------
         # 4. STEERING BAR GAUGE (BOTTOM)
         # -------------------------------------------------------------
-        bar_w = int(w * 0.65)
-        bar_h = 14
+        bar_w = int(w * 0.60)
+        bar_h = 10
         bar_x = (w - bar_w) // 2
-        bar_y = h - 26
+        bar_y = h - 22
 
-        cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + bar_h), (35, 38, 44), -1)
-        cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + bar_h), (70, 75, 85), 1)
+        cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + bar_h), (25, 28, 35), -1)
+        cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + bar_h), (60, 65, 75), 1)
 
         mid_x = bar_x + (bar_w // 2)
-        cv2.line(frame, (mid_x, bar_y - 3), (mid_x, bar_y + bar_h + 3), (200, 200, 200), 2)
+        cv2.line(frame, (mid_x, bar_y - 2), (mid_x, bar_y + bar_h + 2), (200, 200, 200), 2)
 
         steer_fill = int(state.steering_val * (bar_w // 2))
-        if steer_fill < 0:
-            cv2.rectangle(frame, (mid_x + steer_fill, bar_y), (mid_x, bar_y + bar_h), (255, 180, 0), -1)
-        elif steer_fill > 0:
-            cv2.rectangle(frame, (mid_x, bar_y), (mid_x + steer_fill, bar_y + bar_h), (255, 180, 0), -1)
-
-        # Mode tag at top right
-        if self.keyboard_ctrl.practice_mode:
-            cv2.putText(frame, "[PRACTICE MODE - NO KEYS]", (w - 245, 26),
-                        cv2.FONT_HERSHEY_DUPLEX, 0.45, (0, 200, 255), 1, cv2.LINE_AA)
-        elif self.keyboard_ctrl.is_interrupted:
-            cv2.putText(frame, "[INTERRUPTED - RE-ARM REQ]", (w - 250, 26),
-                        cv2.FONT_HERSHEY_DUPLEX, 0.45, (50, 50, 255), 1, cv2.LINE_AA)
-        elif self.keyboard_ctrl.is_enabled():
-            cv2.putText(frame, "[LIVE NOTEBOOK DRIVE]", (w - 200, 26),
-                        cv2.FONT_HERSHEY_DUPLEX, 0.45, (80, 255, 120), 1, cv2.LINE_AA)
-        else:
-            cv2.putText(frame, "[STANDBY / PAUSED]", (w - 175, 26),
-                        cv2.FONT_HERSHEY_DUPLEX, 0.42, (120, 120, 140), 1, cv2.LINE_AA)
+        if steer_fill != 0:
+            steer_color = (0, 190, 255) if steer_fill < 0 else (0, 220, 255)
+            x1 = min(mid_x, mid_x + steer_fill)
+            x2 = max(mid_x, mid_x + steer_fill)
+            cv2.rectangle(frame, (x1, bar_y), (x2, bar_y + bar_h), steer_color, -1)
 
         return frame

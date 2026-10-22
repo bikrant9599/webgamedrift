@@ -66,10 +66,14 @@ class HandData:
     second_landmarks_pixel: List[Tuple[int, int]] = field(default_factory=list)
     second_fingers_extended: List[bool] = field(default_factory=lambda: [False]*5)
 
-    # Specific Right-Hand Index Finger Gesture Recognition
+    # Specific Gesture Recognition flags
     right_hand_detected: bool = False
     left_hand_detected: bool = False
     right_index_raised: bool = False
+    any_index_raised: bool = False
+    any_peace_sign: bool = False
+    any_fist: bool = False
+    any_open_palm: bool = False
     right_hand_landmarks: List[Tuple[int, int]] = field(default_factory=list)
     left_hand_landmarks: List[Tuple[int, int]] = field(default_factory=list)
 
@@ -264,13 +268,14 @@ class HandTracker:
                 right_hand_raw = h0
             else:
                 left_hand_raw = h0
+                # Fallback: single detected hand can drive all gestures
+                right_hand_raw = h0
 
         # Update detected flags and pixel coordinates
         if right_hand_raw is not None:
             hand_data.right_hand_detected = True
             hand_data.confidence = 0.95
             hand_data.right_hand_landmarks = [(int(x * w), int(y * h)) for x, y in right_hand_raw[:, :2]]
-            # Check raised index finger on the physical Right Hand
             hand_data.right_index_raised = self._is_index_finger_raised(right_hand_raw, h, w)
 
         if left_hand_raw is not None:
@@ -278,6 +283,18 @@ class HandTracker:
             hand_data.left_hand_landmarks = [(int(x * w), int(y * h)) for x, y in left_hand_raw[:, :2]]
             if not hand_data.right_hand_detected:
                 hand_data.confidence = 0.90
+
+        # Unified gesture detection across all visible hands
+        for h_raw in detected_hands_raw:
+            if self._is_index_finger_raised(h_raw, h, w):
+                hand_data.any_index_raised = True
+                hand_data.right_index_raised = True
+            if self._is_peace_sign(h_raw):
+                hand_data.any_peace_sign = True
+            if self._is_fist(h_raw):
+                hand_data.any_fist = True
+            if self._is_open_palm(h_raw):
+                hand_data.any_open_palm = True
 
         # -------------------------------------------------------------
         # TWO-HAND STEERING WHEEL CALCULATIONS
@@ -412,44 +429,48 @@ class HandTracker:
             # Fallback to screen position if coordinates invalid
             return float(landmarks[0, 0]) > 0.5 if mirror else float(landmarks[0, 0]) < 0.5
 
-    def _is_index_finger_raised(self, landmarks: np.ndarray, h: int, w: int) -> bool:
+    def _is_index_finger_raised(self, landmarks: np.ndarray, h: int = 480, w: int = 640) -> bool:
         """
-        Returns True if the index finger is raised and extended,
-        while the other three fingers (middle, ring, pinky) are sufficiently curled.
+        Returns True if the index finger is raised and extended upward,
+        while middle, ring, pinky fingers are curled towards palm.
         """
         wrist = landmarks[0, :2]
-
-        # Index finger: tip (8), dip (7), pip (6), mcp (5)
         i_tip = landmarks[8, :2]
         i_pip = landmarks[6, :2]
         i_mcp = landmarks[5, :2]
 
-        # In image coords, Y is smaller towards the top of the frame.
-        # Index finger must point upward: tip is higher than pip and mcp
-        is_index_up = (i_tip[1] < i_pip[1]) and (i_tip[1] < i_mcp[1])
-        i_dist_tip = np.linalg.norm(i_tip - wrist)
-        i_dist_pip = np.linalg.norm(i_pip - wrist)
-        is_index_extended = bool(i_dist_tip > i_dist_pip * 1.15) and is_index_up
+        # Index tip higher than PIP or extended away from wrist
+        i_dist_tip = float(np.linalg.norm(i_tip - wrist))
+        i_dist_pip = float(np.linalg.norm(i_pip - wrist))
+        is_index_extended = (i_dist_tip > i_dist_pip * 1.08) or (i_tip[1] < i_pip[1] and i_tip[1] < i_mcp[1])
 
         if not is_index_extended:
             return False
 
-        # Check that Middle (12), Ring (16), Pinky (20) are curled
-        # For curled fingers: tip is closer to wrist, or tip Y is below PIP Y
-        m_tip = landmarks[12, :2]
-        m_pip = landmarks[10, :2]
-        m_curled = (m_tip[1] >= m_pip[1] - 0.02) or (np.linalg.norm(m_tip - wrist) <= np.linalg.norm(m_pip - wrist) * 1.10)
+        ext = self._detect_extended_fingers(landmarks)
+        # If middle finger is also extended, it's peace sign or open palm, NOT index raised
+        if ext[2]:
+            return False
+        # Ring or pinky shouldn't be extended
+        if ext[3] and ext[4]:
+            return False
 
-        r_tip = landmarks[16, :2]
-        r_pip = landmarks[14, :2]
-        r_curled = (r_tip[1] >= r_pip[1] - 0.02) or (np.linalg.norm(r_tip - wrist) <= np.linalg.norm(r_pip - wrist) * 1.10)
+        return True
 
-        p_tip = landmarks[20, :2]
-        p_pip = landmarks[18, :2]
-        p_curled = (p_tip[1] >= p_pip[1] - 0.02) or (np.linalg.norm(p_tip - wrist) <= np.linalg.norm(p_pip - wrist) * 1.10)
+    def _is_peace_sign(self, landmarks: np.ndarray) -> bool:
+        """Returns True if Index and Middle fingers are extended, while Ring and Pinky are curled."""
+        ext = self._detect_extended_fingers(landmarks)
+        return bool(ext[1] and ext[2] and not ext[3] and not ext[4])
 
-        # Distinguish from open palm (where middle/ring/pinky are extended)
-        return bool(is_index_extended and m_curled and r_curled and p_curled)
+    def _is_fist(self, landmarks: np.ndarray) -> bool:
+        """Returns True if all four fingers (Index, Middle, Ring, Pinky) are curled."""
+        ext = self._detect_extended_fingers(landmarks)
+        return bool(not ext[1] and not ext[2] and not ext[3] and not ext[4])
+
+    def _is_open_palm(self, landmarks: np.ndarray) -> bool:
+        """Returns True if all four fingers are extended."""
+        ext = self._detect_extended_fingers(landmarks)
+        return bool(ext[1] and ext[2] and ext[3] and ext[4])
 
     def _detect_extended_fingers(self, landmarks: np.ndarray) -> List[bool]:
         wrist = landmarks[0, :2]

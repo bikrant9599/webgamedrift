@@ -1,7 +1,7 @@
 {
     "active_preset": "normal",
-    "steering_mode": "notebook",
-    "notebook_steering_enabled": true,
+    "steering_mode": "hand",
+    "notebook_steering_enabled": false,
     "notebook_neutral_angle": 0.0,
     "notebook_neutral_pitch": 0.0,
     "notebook_neutral_height": 0.0,
@@ -29,7 +29,7 @@
     "neutral_hand_size": 0.2,
     "comfortable_range_x": 0.25,
     "deadzone_x": 0.08,
-    "deadzone_angle": 12.0,
+    "deadzone_angle": 8.0,
     "steering_sensitivity": 1.0,
     "smoothing_factor": 0.45,
     "direction_debounce_frames": 2,
@@ -37,7 +37,7 @@
     "accel_mode": "right_index",
     "brake_gesture_type": "fist",
     "handbrake_type": "peace",
-    "require_manual_resume": true,
+    "require_manual_resume": false,
     "is_calibrated": true,
     "accel_forward_threshold": 0.04,
     "accel_y_threshold": 0.12

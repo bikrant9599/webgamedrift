@@ -133,16 +133,14 @@ python main.py
 ## 🕹️ Quick Play Guide
 
 1. **Launch App**: Run `python main.py`.
-2. **Hold Notebook**: Hold your orange notebook horizontally with both hands in front of the camera like a steering wheel.
-3. **One-Click Play**: Click **`🎮 1-CLICK PLAY NOW`** in the top bar to automatically launch [Burnout Drift: Hilltop](https://poki.com/en/g/burnout-drift-hilltop) in Microsoft Edge / Chrome.
-4. **Recenter / Calibrate**: Hold your notebook level and click **`🎯 Recenter Wheel`** (or click **`📓 CALIBRATE NOTEBOOK WHEEL (5-STEP)`** for full calibration).
-5. **Focus Browser Canvas**: Click inside the game canvas in Edge so the banner turns green (`GAME FOCUSED`), or click **`🎯 FOCUS EDGE GAME`**.
-6. **Start Driving**: Click **`▶ START DRIVING`** (or switch to **`🗗 Mini HUD Mode`** to keep a floating HUD over the game).
-7. **Drive**:
-   - Rotate notebook clockwise to steer right; counter-clockwise to steer left.
-   - Raise your **right index finger** ☝️ to accelerate (lower it to stop).
-   - Tilt notebook forward 📐 or form a fist ✊ to brake.
-   - Flash a **Peace Sign** ✌️ to pop the handbrake into high-speed drifts!
+2. **Open Game**: Click **`🌐 OPEN GAME`** in the top bar to launch [Burnout Drift: Hilltop](https://poki.com/en/g/burnout-drift-hilltop).
+3. **Start Driving**: Click the green **`▶ START DRIVING`** button.
+4. **Drive With Hand Signs**:
+   - ☝️ **Point Up (Index Finger)**: Accelerate (`W` / `Up Arrow`)
+   - ✊ **Fist**: Brake / Reverse (`S` / `Down Arrow`)
+   - ✌️ **Peace Sign**: Pop the handbrake into high-speed drifts (`Spacebar`)
+   - 👈 / 👉 **Tilt Hand Left / Right**: Steer (`A` / `D` or `Left` / `Right`)
+   - ✋ **Open Palm**: Coast (Keys Released)
    - Press <kbd>Escape</kbd> anytime for Emergency Stop.
 
 ---

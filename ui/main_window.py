@@ -1,22 +1,19 @@
 """
 Main window interface for Burnout Camera Drive.
-Designed with a dark charcoal and electric-blue racing aesthetic.
-Features live camera HUD with animated virtual steering wheel,
-Practice Mode vs Live Driving selector, Smart Guided Calibration,
-Sensitivity Presets (Beginner, Normal, Pro), Session Statistics, and Safety Re-Arm.
+Simple, sleek, and intuitive hand-gesture racing controller.
+Designed with a dark carbon racing aesthetic and clear live visual feedback.
 """
 
 import sys
 import os
 import time
 import webbrowser
-import threading
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Optional, Dict
 
 import tkinter as tk
 import customtkinter as ctk
-from PIL import Image, ImageTk
+from PIL import Image
 
 from controller.camera import CameraThread, list_available_cameras
 from controller.hand_tracking import HandTracker
@@ -24,38 +21,39 @@ from controller.gesture_detection import GestureDetector
 from controller.calibration import CalibrationManager
 from controller.keyboard_control import KeyboardController
 from controller.session_stats import SessionTracker
-from ui.settings import SettingsWindow
-from ui.mini_hud import MiniHUDWindow
 
 logger = logging.getLogger("burnout.main_window")
 
-# Theme Palette
-BG_ROOT = "#0F1115"
-BG_CARD = "#171A21"
-BG_CARD_INNER = "#1F232D"
+# Modern Carbon & Neon Palette
+BG_ROOT = "#0C0E12"
+BG_CARD = "#141720"
+BG_CARD_INNER = "#1B202D"
+BG_CARD_ALT = "#222736"
+
 ACCENT_BLUE = "#00D2FF"
-ACCENT_CYAN = "#00F0FF"
 ACCENT_GREEN = "#00FF88"
 ACCENT_RED = "#FF3366"
 ACCENT_AMBER = "#FFB800"
+ACCENT_PURPLE = "#D946EF"
+
 TEXT_WHITE = "#FFFFFF"
 TEXT_MUTED = "#8A94A6"
-BORDER_SUBTLE = "#282E3B"
+BORDER_SUBTLE = "#262C3D"
 
 GAME_URL = "https://poki.com/en/g/burnout-drift-hilltop"
 
 
 class MainWindow(ctk.CTk):
     """
-    Main racing interface window.
+    Simple, intuitive racing controller dashboard.
     """
 
     def __init__(self):
         super().__init__()
 
-        self.title("BURNOUT CAMERA DRIVE — Smart Virtual Wheel & Hilltop Controller")
-        self.geometry("1220x780")
-        self.minsize(1080, 700)
+        self.title("BURNOUT CAMERA DRIVE — Hand Gesture Controller")
+        self.geometry("1060x720")
+        self.minsize(960, 640)
         self.configure(fg_color=BG_ROOT)
 
         ctk.set_appearance_mode("dark")
@@ -74,6 +72,8 @@ class MainWindow(ctk.CTk):
         self.hand_tracker = HandTracker(two_handed_mode=self.calibration.two_hand_mode_enabled)
         self.gesture_detector = GestureDetector(self.calibration)
         self.keyboard_ctrl = KeyboardController()
+        self.keyboard_ctrl.require_manual_resume = False
+        self.keyboard_ctrl.check_focus = False
         self.session_tracker = SessionTracker()
 
         # Camera management
@@ -83,39 +83,39 @@ class MainWindow(ctk.CTk):
 
         # Driving state
         self.is_driving = False
-        self.is_practice_mode = False
-        self.mini_hud: Optional[MiniHUDWindow] = None
         self._is_closing = False
         self._loop_after_id = None
+        self.focus_game_only_var = tk.BooleanVar(value=False)
 
-        # Build UI layout
+        # Build clean UI layout
         self._build_header()
         self._build_main_layout()
 
-        # Bind global Escape key to Emergency Stop
+        # Global hotkey Escape for Emergency Stop
         self.bind("<Escape>", lambda event: self._on_emergency_stop())
 
         # Start Camera Thread & Session
         self.session_tracker.start_session(mode="live")
         self._start_camera_thread()
 
-        # Start UI loop
+        # Start UI loop (~30 FPS)
         self._update_ui_loop()
 
         # Protocol for clean window exit
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _build_header(self):
-        """Top navigation and command bar."""
-        self.header = ctk.CTkFrame(self, fg_color=BG_CARD, height=64, corner_radius=0, border_width=1, border_color=BORDER_SUBTLE)
+        """Top navigation bar: branding and quick action buttons."""
+        self.header = ctk.CTkFrame(self, fg_color=BG_CARD, height=60, corner_radius=0, border_width=1, border_color=BORDER_SUBTLE)
         self.header.pack(fill="x", side="top")
 
+        # Left Branding
         brand_frame = ctk.CTkFrame(self.header, fg_color="transparent")
-        brand_frame.pack(side="left", padx=16, pady=10)
+        brand_frame.pack(side="left", padx=18, pady=10)
 
         title_lbl = ctk.CTkLabel(
             brand_frame,
-            text="BURNOUT CAMERA DRIVE",
+            text="🏎️ BURNOUT CAMERA DRIVE",
             font=ctk.CTkFont(family="Segoe UI", size=18, weight="bold"),
             text_color=TEXT_WHITE
         )
@@ -123,520 +123,235 @@ class MainWindow(ctk.CTk):
 
         self.mode_tag = ctk.CTkLabel(
             brand_frame,
-            text=" LIVE MODE ",
-            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
-            fg_color="#0D2E47",
-            text_color=ACCENT_BLUE,
-            corner_radius=4
+            text=" ⏸ STANDBY ",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            fg_color="#1E2430",
+            text_color=TEXT_MUTED,
+            corner_radius=6,
+            padx=8,
+            pady=2
         )
-        self.mode_tag.pack(side="left", padx=10)
+        self.mode_tag.pack(side="left", padx=12)
 
+        # Right Action Buttons
         actions_frame = ctk.CTkFrame(self.header, fg_color="transparent")
         actions_frame.pack(side="right", padx=16, pady=10)
-
-        # Mode Selector (Practice vs Live)
-        self.practice_btn = ctk.CTkButton(
-            actions_frame,
-            text="🎯 PRACTICE MODE: OFF",
-            fg_color="#1E2430",
-            hover_color="#2A3242",
-            text_color=TEXT_WHITE,
-            font=ctk.CTkFont(size=11, weight="bold"),
-            width=165,
-            height=34,
-            command=self._toggle_practice_mode
-        )
-        self.practice_btn.pack(side="left", padx=5)
 
         # Open Game Button
         self.open_game_btn = ctk.CTkButton(
             actions_frame,
             text="🌐 OPEN GAME",
-            fg_color="#1E3048",
-            hover_color="#274266",
-            text_color=ACCENT_BLUE,
-            font=ctk.CTkFont(weight="bold", size=11),
-            width=115,
+            fg_color="#006699",
+            hover_color="#0088CC",
+            text_color=TEXT_WHITE,
+            font=ctk.CTkFont(size=12, weight="bold"),
+            width=120,
             height=34,
             command=self._on_open_game
         )
         self.open_game_btn.pack(side="left", padx=5)
 
-        # Settings Button
-        self.settings_btn = ctk.CTkButton(
+        # Recenter Button
+        self.recenter_btn = ctk.CTkButton(
             actions_frame,
-            text="⚙ SETTINGS",
-            fg_color="#252A34",
-            hover_color="#333A48",
-            text_color=TEXT_WHITE,
-            font=ctk.CTkFont(weight="bold", size=11),
-            width=95,
+            text="🎯 RECENTER",
+            fg_color="#1F2836",
+            hover_color="#2B374A",
+            text_color=ACCENT_BLUE,
+            font=ctk.CTkFont(size=12, weight="bold"),
+            width=105,
             height=34,
-            command=self._open_settings
+            command=self._on_recenter_steering
         )
-        self.settings_btn.pack(side="left", padx=5)
+        self.recenter_btn.pack(side="left", padx=5)
 
         # Emergency Stop Button
         self.emg_btn = ctk.CTkButton(
             actions_frame,
-            text="🛑 EMERGENCY STOP (ESC)",
+            text="🛑 STOP (ESC)",
             fg_color=ACCENT_RED,
             hover_color="#E02555",
             text_color=TEXT_WHITE,
-            font=ctk.CTkFont(weight="bold", size=11),
-            width=175,
+            font=ctk.CTkFont(size=12, weight="bold"),
+            width=110,
             height=34,
             command=self._on_emergency_stop
         )
         self.emg_btn.pack(side="left", padx=5)
 
     def _build_main_layout(self):
-        """Build two-column dashboard: Left = Video Preview & HUD, Right = Telemetry & Controls."""
+        """Two-column layout: Left = Live Video & Active Action, Right = Controls & Key Badges."""
         self.main_container = ctk.CTkFrame(self, fg_color="transparent")
-        self.main_container.pack(fill="both", expand=True, padx=16, pady=10)
+        self.main_container.pack(fill="both", expand=True, padx=16, pady=12)
 
-        # ----------------- LEFT COLUMN: VIDEO & STEERING HUD -----------------
+        # ----------------- LEFT COLUMN: CAMERA & STEERING HUD -----------------
         self.left_col = ctk.CTkFrame(self.main_container, fg_color=BG_CARD, corner_radius=12, border_width=1, border_color=BORDER_SUBTLE)
-        self.left_col.pack(side="left", fill="both", expand=True, padx=(0, 8), pady=0)
+        self.left_col.pack(side="left", fill="both", expand=True, padx=(0, 10), pady=0)
 
-        # Safety Re-Arm Alert Banner (shown when tracking drops during live driving)
-        self.rearm_banner = ctk.CTkFrame(self.left_col, fg_color="#4A1521", corner_radius=8, height=36)
-        self.rearm_banner_lbl = ctk.CTkLabel(
-            self.rearm_banner,
-            text="⚠️ TRACKING INTERRUPTED — INPUTS SAFELY PAUSED",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            text_color=TEXT_WHITE
+        # Top Big Live Action Banner
+        self.action_banner = ctk.CTkLabel(
+            self.left_col,
+            text="👋 SHOW YOUR HAND TO THE CAMERA TO DRIVE",
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+            text_color=TEXT_WHITE,
+            fg_color="#1B2230",
+            corner_radius=8,
+            height=44
         )
-        self.rearm_banner_lbl.pack(side="left", padx=12, pady=6)
+        self.action_banner.pack(fill="x", padx=12, pady=(12, 8))
 
-        self.rearm_banner_btn = ctk.CTkButton(
-            self.rearm_banner,
-            text="RESUME DRIVING",
-            fg_color=ACCENT_RED,
-            hover_color="#FF4D79",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            width=130,
-            height=26,
-            command=self._on_rearm_click
-        )
-        self.rearm_banner_btn.pack(side="right", padx=8, pady=5)
-        self.rearm_banner.pack_forget()
+        # Fixed Video Preview Box (pack_propagate=False prevents recursive ballooning!)
+        self.video_box = ctk.CTkFrame(self.left_col, fg_color="#08090C", corner_radius=10, width=640, height=480)
+        self.video_box.pack(fill="both", expand=True, padx=12, pady=(0, 8))
+        self.video_box.pack_propagate(False)
 
-        # Game Window Focus Alert Banner (shown when driving is active but browser is not clicked)
-        self.focus_banner = ctk.CTkFrame(self.left_col, fg_color="#3D2900", corner_radius=8, height=36)
-        self.focus_banner_lbl = ctk.CTkLabel(
-            self.focus_banner,
-            text="⚠️ CLICK BROWSER GAME WINDOW TO FOCUS — Keyboard inputs require active browser focus!",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            text_color="#FFB800"
-        )
-        self.focus_banner_lbl.pack(side="left", padx=12, pady=6)
+        self.video_label = ctk.CTkLabel(self.video_box, text="Connecting Camera...", text_color=TEXT_MUTED)
+        self.video_label.place(relx=0.5, rely=0.5, anchor="center")
 
-        self.focus_banner_btn = ctk.CTkButton(
-            self.focus_banner,
-            text="🎯 FOCUS EDGE NOW",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            fg_color=ACCENT_BLUE,
-            hover_color="#0090E0",
-            width=140,
-            height=26,
-            command=self._on_focus_game_click
-        )
-        self.focus_banner_btn.pack(side="right", padx=8, pady=5)
-        self.focus_banner.pack_forget()
-
-        # Video Frame Container
-        self.video_box = ctk.CTkFrame(self.left_col, fg_color="#0B0C0E", corner_radius=8)
-        self.video_box.pack(fill="both", expand=True, padx=10, pady=(10, 8))
-
-        self.video_label = ctk.CTkLabel(self.video_box, text="Initializing Camera Stream...", text_color=TEXT_MUTED)
-        self.video_label.pack(fill="both", expand=True, padx=2, pady=2)
-
-        # Steering HUD Gauge underneath video
-        hud_bar_frame = ctk.CTkFrame(self.left_col, fg_color=BG_CARD_INNER, corner_radius=8)
-        hud_bar_frame.pack(fill="x", padx=10, pady=(0, 6))
+        # Steering Gauge Bar underneath video
+        hud_bar_frame = ctk.CTkFrame(self.left_col, fg_color=BG_CARD_INNER, corner_radius=8, height=44)
+        hud_bar_frame.pack(fill="x", padx=12, pady=(0, 12))
 
         gauge_labels = ctk.CTkFrame(hud_bar_frame, fg_color="transparent")
         gauge_labels.pack(fill="x", padx=12, pady=(4, 2))
 
         ctk.CTkLabel(gauge_labels, text="◀ STEER LEFT", font=ctk.CTkFont(size=11, weight="bold"), text_color=ACCENT_BLUE).pack(side="left")
-        self.steer_deg_lbl = ctk.CTkLabel(gauge_labels, text="CENTER (0%)", font=ctk.CTkFont(family="Consolas", size=12, weight="bold"), text_color=TEXT_WHITE)
-        self.steer_deg_lbl.pack(side="top")
+        self.steer_lbl = ctk.CTkLabel(gauge_labels, text="CENTER (0.0°)", font=ctk.CTkFont(family="Consolas", size=12, weight="bold"), text_color=TEXT_WHITE)
+        self.steer_lbl.pack(side="top")
         ctk.CTkLabel(gauge_labels, text="STEER RIGHT ▶", font=ctk.CTkFont(size=11, weight="bold"), text_color=ACCENT_BLUE).pack(side="right")
 
-        self.steer_prog = ctk.CTkProgressBar(hud_bar_frame, height=10, progress_color=ACCENT_BLUE, fg_color="#121418")
-        self.steer_prog.pack(fill="x", padx=14, pady=(2, 6))
+        self.steer_prog = ctk.CTkProgressBar(hud_bar_frame, height=8, progress_color=ACCENT_BLUE, fg_color="#0F1218")
+        self.steer_prog.pack(fill="x", padx=12, pady=(2, 6))
         self.steer_prog.set(0.5)
 
-        # Active Keyboard HUD Badges
-        keys_card = ctk.CTkFrame(self.left_col, fg_color=BG_CARD_INNER, corner_radius=8)
-        keys_card.pack(fill="x", padx=10, pady=(0, 10))
+        # ----------------- RIGHT COLUMN: CONTROL PANEL -----------------
+        self.right_col = ctk.CTkFrame(self.main_container, fg_color=BG_CARD, corner_radius=12, width=350, border_width=1, border_color=BORDER_SUBTLE)
+        self.right_col.pack(side="right", fill="y", padx=(0, 0), pady=0)
+        self.right_col.pack_propagate(False)
 
-        k_title_row = ctk.CTkFrame(keys_card, fg_color="transparent")
-        k_title_row.pack(fill="x", padx=12, pady=(4, 2))
-        ctk.CTkLabel(k_title_row, text="SIMULATED KEYBOARD INPUTS (HARDWARE SCAN CODES):", font=ctk.CTkFont(size=10, weight="bold"), text_color=TEXT_MUTED).pack(side="left")
-
-        badges_row = ctk.CTkFrame(keys_card, fg_color="transparent")
-        badges_row.pack(fill="x", padx=12, pady=(2, 6))
-
-        self.key_badges = {}
-        badge_specs = [
-            ("accelerate", "▲ ACCEL (UP)"),
-            ("brake", "▼ BRAKE (DOWN)"),
-            ("steer_left", "◀ LEFT"),
-            ("steer_right", "▶ RIGHT"),
-            ("handbrake", "⎵ DRIFT (SPACE)")
-        ]
-
-        for action_key, label_text in badge_specs:
-            badge = ctk.CTkLabel(
-                badges_row,
-                text=label_text,
-                font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
-                fg_color="#171A21",
-                text_color="#555E6D",
-                corner_radius=6,
-                height=26,
-                padx=8
-            )
-            badge.pack(side="left", padx=3, expand=True, fill="x")
-            self.key_badges[action_key] = badge
-
-        # ----------------- RIGHT COLUMN: TELEMETRY & CONTROLS -----------------
-        self.right_col = ctk.CTkScrollableFrame(self.main_container, fg_color=BG_CARD, corner_radius=12, width=410, border_width=1, border_color=BORDER_SUBTLE)
-        self.right_col.pack(side="right", fill="both", padx=(8, 0), pady=0)
-
-        # 1. DRIVING COMMAND CENTER
-        self._create_panel_header(self.right_col, "DRIVING CONTROLLER STATUS")
+        # Card 1: Master Drive Switch
         ctrl_card = ctk.CTkFrame(self.right_col, fg_color=BG_CARD_INNER, corner_radius=10)
-        ctrl_card.pack(fill="x", padx=8, pady=(2, 8))
+        ctrl_card.pack(fill="x", padx=12, pady=(12, 8))
 
-        # Hero Play Now Button (1-Click Play & Launch)
-        self.play_now_btn = ctk.CTkButton(
-            ctrl_card,
-            text="🎮 1-CLICK PLAY NOW (LAUNCH GAME)",
-            fg_color="#0077BE",
-            hover_color="#0090E0",
-            text_color=TEXT_WHITE,
-            font=ctk.CTkFont(size=13, weight="bold"),
-            height=42,
-            command=self._on_play_now
-        )
-        self.play_now_btn.pack(fill="x", padx=12, pady=(10, 5))
-
-        self.start_btn = ctk.CTkButton(
+        self.drive_btn = ctk.CTkButton(
             ctrl_card,
             text="▶ START DRIVING",
             fg_color="#00A86B",
             hover_color="#00C87F",
             text_color=TEXT_WHITE,
-            font=ctk.CTkFont(size=14, weight="bold"),
-            height=44,
-            command=self._on_start_driving
+            font=ctk.CTkFont(size=15, weight="bold"),
+            height=50,
+            command=self._toggle_driving
         )
-        self.start_btn.pack(fill="x", padx=12, pady=(2, 5))
+        self.drive_btn.pack(fill="x", padx=12, pady=(12, 6))
 
-        self.stop_btn = ctk.CTkButton(
+        self.drive_hint_lbl = ctk.CTkLabel(
             ctrl_card,
-            text="⏸ STOP DRIVING (STANDBY)",
-            fg_color="#2A2F3D",
-            hover_color="#363C4E",
-            text_color=TEXT_MUTED,
-            font=ctk.CTkFont(size=12, weight="bold"),
-            height=34,
-            command=self._on_stop_driving
-        )
-        self.stop_btn.pack(fill="x", padx=12, pady=(0, 6))
-
-        # Recenter and Mini HUD controls row
-        aux_row = ctk.CTkFrame(ctrl_card, fg_color="transparent")
-        aux_row.pack(fill="x", padx=12, pady=(0, 10))
-
-        self.recenter_btn = ctk.CTkButton(
-            aux_row,
-            text="🎯 Recenter Wheel",
-            fg_color="#183D50",
-            hover_color="#235874",
-            text_color=ACCENT_CYAN,
-            font=ctk.CTkFont(size=11, weight="bold"),
-            height=32,
-            command=self._on_recenter_steering
-        )
-        self.recenter_btn.pack(side="left", padx=(0, 3), expand=True, fill="x")
-
-        self.mini_hud_btn = ctk.CTkButton(
-            aux_row,
-            text="🗗 Mini HUD Mode",
-            fg_color="#232731",
-            hover_color="#2E3544",
-            text_color=TEXT_WHITE,
-            font=ctk.CTkFont(size=11, weight="bold"),
-            height=32,
-            command=self._on_open_mini_hud
-        )
-        self.mini_hud_btn.pack(side="right", padx=(3, 0), expand=True, fill="x")
-
-        # 2. SENSITIVITY PRESETS ROW (1-CLICK)
-        self._create_panel_header(self.right_col, "STEERING SENSITIVITY PRESETS")
-        presets_box = ctk.CTkFrame(self.right_col, fg_color=BG_CARD_INNER, corner_radius=10)
-        presets_box.pack(fill="x", padx=8, pady=(2, 8))
-
-        p_row = ctk.CTkFrame(presets_box, fg_color="transparent")
-        p_row.pack(fill="x", padx=8, pady=8)
-
-        self.p_btn_beg = ctk.CTkButton(
-            p_row, text="🔰 Beginner", width=85, height=30, font=ctk.CTkFont(size=11),
-            fg_color="#222631", hover_color="#2E3544", command=lambda: self._apply_preset_from_main("beginner")
-        )
-        self.p_btn_beg.pack(side="left", padx=2, expand=True, fill="x")
-
-        self.p_btn_norm = ctk.CTkButton(
-            p_row, text="🏎️ Normal", width=85, height=30, font=ctk.CTkFont(size=11),
-            fg_color="#0077BE", hover_color="#0090E0", command=lambda: self._apply_preset_from_main("normal")
-        )
-        self.p_btn_norm.pack(side="left", padx=2, expand=True, fill="x")
-
-        self.p_btn_pro = ctk.CTkButton(
-            p_row, text="⚡ Pro", width=85, height=30, font=ctk.CTkFont(size=11),
-            fg_color="#222631", hover_color="#2E3544", command=lambda: self._apply_preset_from_main("pro")
-        )
-        self.p_btn_pro.pack(side="left", padx=2, expand=True, fill="x")
-
-        # Two-hand virtual wheel toggle button
-        wheel_toggle_row = ctk.CTkFrame(presets_box, fg_color="transparent")
-        wheel_toggle_row.pack(fill="x", padx=10, pady=(0, 8))
-        self.wheel_mode_btn = ctk.CTkButton(
-            wheel_toggle_row,
-            text="🚗 Two-Hand Virtual Wheel: OFF",
-            fg_color="#252A34",
-            hover_color="#333A48",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            command=self._toggle_two_hand_wheel
-        )
-        self.wheel_mode_btn.pack(fill="x", pady=(0, 4))
-
-        self.notebook_mode_btn = ctk.CTkButton(
-            wheel_toggle_row,
-            text=f"📓 Notebook Steering: {'ON' if self.calibration.notebook_steering_enabled else 'OFF'}",
-            fg_color="#D97706" if self.calibration.notebook_steering_enabled else "#252A34",
-            hover_color="#F59E0B" if self.calibration.notebook_steering_enabled else "#333A48",
-            text_color="#000000" if self.calibration.notebook_steering_enabled else TEXT_WHITE,
-            font=ctk.CTkFont(size=11, weight="bold"),
-            command=self._toggle_notebook_mode
-        )
-        self.notebook_mode_btn.pack(fill="x")
-
-        # 3. KEYBOARD & SYSTEM DIAGNOSTIC PANEL (STEP 6)
-        self._create_panel_header(self.right_col, "KEYBOARD & SYSTEM DIAGNOSTIC PANEL")
-        telem_card = ctk.CTkFrame(self.right_col, fg_color=BG_CARD_INNER, corner_radius=10)
-        telem_card.pack(fill="x", padx=8, pady=(2, 6))
-
-        # 11 Live Diagnostic States (Step 6)
-        self.diag_hand_detected_lbl = self._create_telemetry_row(telem_card, "HAND DETECTED:", "NO", ACCENT_AMBER)
-        self.diag_hand_conf_lbl = self._create_telemetry_row(telem_card, "RIGHT HAND CONFIDENCE:", "0%", TEXT_MUTED)
-        self.diag_index_finger_lbl = self._create_telemetry_row(telem_card, "INDEX FINGER:", "DOWN", TEXT_MUTED)
-        self.diag_accel_lbl = self._create_telemetry_row(telem_card, "ACCELERATION:", "INACTIVE", TEXT_MUTED)
-        self.diag_nb_detected_lbl = self._create_telemetry_row(telem_card, "NOTEBOOK DETECTED:", "NO", ACCENT_AMBER)
-        self.diag_nb_angle_lbl = self._create_telemetry_row(telem_card, "NOTEBOOK ANGLE:", "0.0°", TEXT_MUTED)
-        self.diag_steering_lbl = self._create_telemetry_row(telem_card, "STEERING:", "CENTER", TEXT_MUTED)
-        self.diag_brake_lbl = self._create_telemetry_row(telem_card, "BRAKING:", "INACTIVE", TEXT_MUTED)
-        self.diag_game_focus_lbl = self._create_telemetry_row(telem_card, "GAME FOCUS:", "NO", ACCENT_AMBER)
-        self.diag_kb_event_lbl = self._create_telemetry_row(telem_card, "KEYBOARD EVENT:", "NONE", ACCENT_CYAN)
-        self.diag_active_keys_lbl = self._create_telemetry_row(telem_card, "ACTIVE KEYS:", "NONE", TEXT_WHITE)
-
-        # Compatibility aliases
-        self.cam_status_lbl = self.diag_hand_detected_lbl
-        self.tracking_status_lbl = self.diag_hand_detected_lbl
-        self.notebook_status_lbl = self.diag_nb_detected_lbl
-        self.right_index_lbl = self.diag_index_finger_lbl
-        self.game_focus_lbl = self.diag_game_focus_lbl
-        self.gesture_lbl = self.diag_accel_lbl
-        self.throttle_lbl = self.diag_accel_lbl
-        self.brake_lbl = self.diag_brake_lbl
-        self.fps_lbl = self._create_telemetry_row(telem_card, "ENGINE FPS:", "0.0 FPS", ACCENT_BLUE)
-
-        # Test Input & Game Focus Card
-        test_card = ctk.CTkFrame(self.right_col, fg_color=BG_CARD_INNER, corner_radius=10)
-        test_card.pack(fill="x", padx=8, pady=(2, 6))
-
-        test_btn_row = ctk.CTkFrame(test_card, fg_color="transparent")
-        test_btn_row.pack(fill="x", padx=10, pady=(6, 4))
-
-        self.test_input_btn = ctk.CTkButton(
-            test_btn_row,
-            text="🧪 TEST INPUT (SAFE FIELD)",
-            fg_color="#183D50",
-            hover_color="#235874",
-            text_color=ACCENT_CYAN,
-            font=ctk.CTkFont(size=11, weight="bold"),
-            height=30,
-            command=self._toggle_test_input
-        )
-        self.test_input_btn.pack(side="left", padx=(0, 4), expand=True, fill="x")
-
-        self.focus_game_btn = ctk.CTkButton(
-            test_btn_row,
-            text="🎯 FOCUS EDGE GAME",
-            fg_color="#103B5C",
-            hover_color="#185685",
-            text_color=TEXT_WHITE,
-            font=ctk.CTkFont(size=11, weight="bold"),
-            height=30,
-            command=self._on_focus_game_click
-        )
-        self.focus_game_btn.pack(side="right", padx=(4, 0), expand=True, fill="x")
-
-        self.test_input_box = ctk.CTkEntry(
-            test_card,
-            placeholder_text="Click here and raise index finger ☝️ or turn notebook to test keys safely...",
-            font=ctk.CTkFont(family="Consolas", size=10),
-            height=28
-        )
-        self.test_input_box.pack(fill="x", padx=10, pady=(0, 6))
-
-        # 4. SMART CALIBRATION WIZARD CARD
-        self._create_panel_header(self.right_col, "SMART CALIBRATION WIZARD")
-        calib_card = ctk.CTkFrame(self.right_col, fg_color=BG_CARD_INNER, corner_radius=10)
-        calib_card.pack(fill="x", padx=8, pady=(2, 8))
-
-        calib_desc = ctk.CTkLabel(
-            calib_card,
-            text="Calibrate notebook steering wheel or hands. Steering is muted during calibration for safety.",
+            text="Click Start Driving, then show signs to drive!",
             font=ctk.CTkFont(size=11),
-            text_color=TEXT_MUTED,
-            wraplength=340,
-            justify="left"
-        )
-        calib_desc.pack(padx=12, pady=(8, 6), anchor="w")
-
-        self.calib_prog_bar = ctk.CTkProgressBar(calib_card, height=8, progress_color=ACCENT_BLUE, fg_color="#121418")
-        self.calib_prog_bar.pack(fill="x", padx=12, pady=(0, 6))
-        self.calib_prog_bar.set(0.0)
-
-        self.calib_msg_lbl = ctk.CTkLabel(calib_card, text="Status: Ready to calibrate", font=ctk.CTkFont(size=11, weight="bold"), text_color=ACCENT_GREEN)
-        self.calib_msg_lbl.pack(padx=12, pady=(0, 6), anchor="w")
-
-        # Row 1 of calibration: Notebook Calibration Wizard & Color Sampler
-        calib_nb_row = ctk.CTkFrame(calib_card, fg_color="transparent")
-        calib_nb_row.pack(fill="x", padx=10, pady=(2, 4))
-
-        self.calib_notebook_btn = ctk.CTkButton(
-            calib_nb_row,
-            text="📓 5-STEP WIZARD",
-            fg_color="#D97706",
-            hover_color="#F59E0B",
-            text_color="#000000",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            height=34,
-            command=self._on_start_notebook_calibration
-        )
-        self.calib_notebook_btn.pack(side="left", padx=(0, 4), expand=True, fill="x")
-
-        self.sample_color_btn = ctk.CTkButton(
-            calib_nb_row,
-            text="🎨 Sample Color",
-            fg_color="#183D50",
-            hover_color="#235874",
-            text_color=ACCENT_CYAN,
-            font=ctk.CTkFont(size=11, weight="bold"),
-            height=34,
-            command=self._on_sample_notebook_color
-        )
-        self.sample_color_btn.pack(side="right", padx=(4, 0), expand=True, fill="x")
-
-        # Row 2 of calibration: Quick Hand & Guided Hand buttons
-        calib_btn_row = ctk.CTkFrame(calib_card, fg_color="transparent")
-        calib_btn_row.pack(fill="x", padx=10, pady=(0, 10))
-
-        self.calib_quick_btn = ctk.CTkButton(
-            calib_btn_row,
-            text="🎯 Quick Hand (2.5s)",
-            fg_color="#1A3A54",
-            hover_color="#234E72",
-            text_color=ACCENT_BLUE,
-            font=ctk.CTkFont(size=11, weight="bold"),
-            command=self._on_start_quick_calibration
-        )
-        self.calib_quick_btn.pack(side="left", padx=2, expand=True, fill="x")
-
-        self.calib_guided_btn = ctk.CTkButton(
-            calib_btn_row,
-            text="📐 Hand Range (3-Step)",
-            fg_color="#252A34",
-            hover_color="#333A48",
-            text_color=TEXT_WHITE,
-            font=ctk.CTkFont(size=11, weight="bold"),
-            command=self._on_start_guided_calibration
-        )
-        self.calib_guided_btn.pack(side="left", padx=2, expand=True, fill="x")
-
-        # 5. SESSION STATISTICS CARD
-        self._create_panel_header(self.right_col, "SESSION STATISTICS & HISTORY")
-        stats_card = ctk.CTkFrame(self.right_col, fg_color=BG_CARD_INNER, corner_radius=10)
-        stats_card.pack(fill="x", padx=8, pady=(2, 8))
-
-        self.sess_timer_lbl = self._create_telemetry_row(stats_card, "Session Duration:", "00:00:00", TEXT_WHITE)
-        self.sess_driving_lbl = self._create_telemetry_row(stats_card, "Driving Time:", "00:00:00", ACCENT_GREEN)
-        self.sess_interrupt_lbl = self._create_telemetry_row(stats_card, "Tracking Interruptions:", "0", ACCENT_AMBER)
-
-        hist_row = ctk.CTkFrame(stats_card, fg_color="transparent")
-        hist_row.pack(fill="x", padx=10, pady=(4, 8))
-        self.view_hist_btn = ctk.CTkButton(
-            hist_row,
-            text="📜 View Past Session History",
-            fg_color="#222631",
-            hover_color="#2E3544",
-            font=ctk.CTkFont(size=11),
-            command=self._show_session_history_dialog
-        )
-        self.view_hist_btn.pack(fill="x")
-
-        # Privacy guarantee note
-        priv_lbl = ctk.CTkLabel(
-            stats_card,
-            text="🔒 100% Local: No webcam frames or personal data are ever uploaded.",
-            font=ctk.CTkFont(size=9),
             text_color=TEXT_MUTED
         )
-        priv_lbl.pack(padx=10, pady=(0, 6), anchor="w")
+        self.drive_hint_lbl.pack(padx=12, pady=(0, 10))
 
-        # 6. QUICK SENSITIVITY SLIDER
-        self._create_panel_header(self.right_col, "SENSITIVITY & DEADZONE ADJUSTMENT")
-        tune_card = ctk.CTkFrame(self.right_col, fg_color=BG_CARD_INNER, corner_radius=10)
-        tune_card.pack(fill="x", padx=8, pady=(2, 12))
+        # Card 2: Live Active Hardware Keys
+        keys_card = ctk.CTkFrame(self.right_col, fg_color=BG_CARD_INNER, corner_radius=10)
+        keys_card.pack(fill="x", padx=12, pady=(0, 8))
 
-        tune_row = ctk.CTkFrame(tune_card, fg_color="transparent")
-        tune_row.pack(fill="x", padx=12, pady=(8, 2))
-        ctk.CTkLabel(tune_row, text="Steering Sensitivity:", font=ctk.CTkFont(size=12), text_color=TEXT_WHITE).pack(side="left")
-        self.quick_sens_val = ctk.CTkLabel(
-            tune_row,
-            text=f"{self.calibration.steering_sensitivity:.1f}x",
-            font=ctk.CTkFont(family="Consolas", size=12, weight="bold"),
-            text_color=ACCENT_BLUE
+        ctk.CTkLabel(
+            keys_card,
+            text="ACTIVE KEYBOARD KEYS (LIVE)",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=TEXT_MUTED
+        ).pack(anchor="w", padx=12, pady=(10, 6))
+
+        badges_grid = ctk.CTkFrame(keys_card, fg_color="transparent")
+        badges_grid.pack(fill="x", padx=10, pady=(0, 10))
+
+        self.key_badges: Dict[str, ctk.CTkLabel] = {}
+        specs = [
+            ("accelerate", "▲ W / UP", ACCENT_GREEN),
+            ("brake", "▼ S / DOWN", ACCENT_RED),
+            ("steer_left", "◀ A / LEFT", ACCENT_AMBER),
+            ("steer_right", "▶ D / RIGHT", ACCENT_AMBER),
+            ("handbrake", "⎵ SPACEBAR (DRIFT)", ACCENT_BLUE),
+        ]
+
+        # Top row: Left, Accel, Right
+        r1 = ctk.CTkFrame(badges_grid, fg_color="transparent")
+        r1.pack(fill="x", pady=2)
+        for action, text, col in [specs[2], specs[0], specs[3]]:
+            lbl = ctk.CTkLabel(r1, text=text, font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
+                               fg_color="#141822", text_color="#454D5D", corner_radius=6, height=30)
+            lbl.pack(side="left", fill="x", expand=True, padx=2)
+            self.key_badges[action] = lbl
+
+        # Bottom row: Brake, Spacebar
+        r2 = ctk.CTkFrame(badges_grid, fg_color="transparent")
+        r2.pack(fill="x", pady=2)
+        for action, text, col in [specs[1], specs[4]]:
+            lbl = ctk.CTkLabel(r2, text=text, font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
+                               fg_color="#141822", text_color="#454D5D", corner_radius=6, height=30)
+            lbl.pack(side="left", fill="x", expand=True, padx=2)
+            self.key_badges[action] = lbl
+
+        # Card 3: Signs Quick Guide
+        guide_card = ctk.CTkFrame(self.right_col, fg_color=BG_CARD_INNER, corner_radius=10)
+        guide_card.pack(fill="x", padx=12, pady=(0, 8))
+
+        ctk.CTkLabel(
+            guide_card,
+            text="HAND SIGNS GUIDE",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=TEXT_MUTED
+        ).pack(anchor="w", padx=12, pady=(10, 4))
+
+        signs = [
+            ("☝️ Point Up (Index)", "Accelerate (Gas W / UP)"),
+            ("✊ Fist", "Brake / Reverse (S / DOWN)"),
+            ("✌️ Peace Sign", "Handbrake / Drift (SPACE)"),
+            ("👈 / 👉 Tilt Hand", "Steer Left / Right (A / D)"),
+            ("✋ Open Palm", "Coast (Keys Released)"),
+        ]
+        for icon_txt, desc in signs:
+            row = ctk.CTkFrame(guide_card, fg_color="transparent")
+            row.pack(fill="x", padx=12, pady=2)
+            ctk.CTkLabel(row, text=icon_txt, font=ctk.CTkFont(size=12, weight="bold"), text_color=TEXT_WHITE).pack(side="left")
+            ctk.CTkLabel(row, text=desc, font=ctk.CTkFont(size=11), text_color=TEXT_MUTED).pack(side="right")
+
+        ctk.CTkLabel(guide_card, text="", height=4).pack()
+
+        # Card 4: Settings & Options
+        opts_card = ctk.CTkFrame(self.right_col, fg_color=BG_CARD_INNER, corner_radius=10)
+        opts_card.pack(fill="x", padx=12, pady=(0, 10))
+
+        # Mode Selector
+        ctk.CTkLabel(opts_card, text="CONTROL MODE", font=ctk.CTkFont(size=11, weight="bold"), text_color=TEXT_MUTED).pack(anchor="w", padx=12, pady=(10, 2))
+        self.mode_selector = ctk.CTkSegmentedButton(
+            opts_card,
+            values=["✋ Hand Signs", "📓 Notebook"],
+            command=self._on_mode_change
         )
-        self.quick_sens_val.pack(side="right")
+        self.mode_selector.pack(fill="x", padx=12, pady=(2, 6))
+        self.mode_selector.set("✋ Hand Signs" if not self.calibration.notebook_steering_enabled else "📓 Notebook")
 
-        self.quick_sens_slider = ctk.CTkSlider(
-            tune_card, from_=0.4, to=2.5, number_of_steps=21,
-            progress_color=ACCENT_BLUE, button_color=ACCENT_BLUE,
-            command=self._on_quick_sens_change
+        # Steering Sensitivity Preset
+        ctk.CTkLabel(opts_card, text="SENSITIVITY PRESET", font=ctk.CTkFont(size=11, weight="bold"), text_color=TEXT_MUTED).pack(anchor="w", padx=12, pady=(4, 2))
+        self.preset_selector = ctk.CTkSegmentedButton(
+            opts_card,
+            values=["🔰 Beginner", "🏎️ Normal", "⚡ Pro"],
+            command=self._on_preset_change
         )
-        self.quick_sens_slider.pack(fill="x", padx=12, pady=(0, 10))
-        self.quick_sens_slider.set(self.calibration.steering_sensitivity)
-
-    def _create_panel_header(self, parent, text: str):
-        lbl = ctk.CTkLabel(parent, text=text, font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"), text_color=ACCENT_BLUE)
-        lbl.pack(anchor="w", padx=10, pady=(8, 2))
-
-    def _create_telemetry_row(self, parent, label_text: str, default_val: str, val_color: str):
-        row = ctk.CTkFrame(parent, fg_color="transparent")
-        row.pack(fill="x", padx=12, pady=3)
-        ctk.CTkLabel(row, text=label_text, font=ctk.CTkFont(size=12), text_color=TEXT_MUTED).pack(side="left")
-        val_lbl = ctk.CTkLabel(row, text=default_val, font=ctk.CTkFont(family="Consolas", size=12, weight="bold"), text_color=val_color)
-        val_lbl.pack(side="right")
-        return val_lbl
+        self.preset_selector.pack(fill="x", padx=12, pady=(2, 10))
+        cur_preset = self.calibration.config.get("active_preset", "normal").lower()
+        if cur_preset == "beginner":
+            self.preset_selector.set("🔰 Beginner")
+        elif cur_preset == "pro":
+            self.preset_selector.set("⚡ Pro")
+        else:
+            self.preset_selector.set("🏎️ Normal")
 
     def _start_camera_thread(self):
+        """Starts background worker thread for camera and hand tracking."""
         if self.camera_thread and self.camera_thread.is_alive():
             self.camera_thread.stop()
             self.camera_thread.join(timeout=1.0)
@@ -654,487 +369,214 @@ class MainWindow(ctk.CTk):
         )
         self.camera_thread.start()
 
-    def _toggle_practice_mode(self):
-        self.is_practice_mode = not self.is_practice_mode
-        self.keyboard_ctrl.set_practice_mode(self.is_practice_mode)
-
-        if self.is_practice_mode:
-            self.practice_btn.configure(text="🎯 PRACTICE MODE: ON", fg_color="#0077BE", hover_color="#0090E0")
-            self.mode_tag.configure(text=" PRACTICE MODE ", fg_color="#103B5C", text_color=ACCENT_CYAN)
+    def _toggle_driving(self):
+        """Toggles driving on or off."""
+        if self.is_driving:
+            self._on_stop_driving()
         else:
-            self.practice_btn.configure(text="🎯 PRACTICE MODE: OFF", fg_color="#1E2430", hover_color="#2A3242")
-            self.mode_tag.configure(text=" LIVE MODE ", fg_color="#0D2E47", text_color=ACCENT_BLUE)
-
-        logger.info(f"Practice mode toggled: {self.is_practice_mode}")
-
-    def _apply_preset_from_main(self, preset_key: str):
-        self.calibration.apply_preset(preset_key)
-        self.quick_sens_slider.set(self.calibration.steering_sensitivity)
-        self.quick_sens_val.configure(text=f"{self.calibration.steering_sensitivity:.1f}x")
-
-        # Update button highlights
-        self.p_btn_beg.configure(fg_color="#0077BE" if preset_key == "beginner" else "#222631")
-        self.p_btn_norm.configure(fg_color="#0077BE" if preset_key == "normal" else "#222631")
-        self.p_btn_pro.configure(fg_color="#0077BE" if preset_key == "pro" else "#222631")
-
-    def _toggle_two_hand_wheel(self):
-        curr = self.calibration.two_hand_mode_enabled
-        new_val = not curr
-        self.calibration.set_two_hand_mode(new_val)
-        self.hand_tracker.set_two_handed_mode(new_val)
-        status_str = "ON (with 1-hand fallback)" if new_val else "OFF"
-        self.wheel_mode_btn.configure(text=f"🚗 Two-Hand Virtual Wheel: {status_str}", fg_color="#0077BE" if new_val else "#252A34")
-
-    def _toggle_notebook_mode(self):
-        curr = self.calibration.notebook_steering_enabled
-        new_val = not curr
-        self.calibration.set_notebook_steering_enabled(new_val)
-        status_str = "ON" if new_val else "OFF"
-        self.notebook_mode_btn.configure(
-            text=f"📓 Notebook Steering: {status_str}",
-            fg_color="#D97706" if new_val else "#252A34",
-            hover_color="#F59E0B" if new_val else "#333A48",
-            text_color="#000000" if new_val else TEXT_WHITE
-        )
-        logger.info(f"Notebook steering toggled: {status_str}")
-
-    def _on_play_now(self):
-        """
-        One-Click Play workflow:
-        1. Opens Burnout Drift Hilltop in browser.
-        2. Automatically activates driving controller.
-        3. Attempts to focus browser and instructs user on exact steps.
-        """
-        self._on_open_game()
-        self._on_start_driving()
-        self.after(1200, self._on_focus_game_click)
-        self.calib_msg_lbl.configure(
-            text="🎮 DRIVING ACTIVE! Click inside the browser game window once to focus, then drive!",
-            text_color=ACCENT_GREEN
-        )
-        logger.info("One-Click Play Now executed with driving activated.")
-
-    def _on_recenter_steering(self):
-        """1-click instantaneous recentering of notebook or hand neutral position."""
-        if self.camera_thread:
-            _, _, hand, nb, _, _ = self.camera_thread.get_latest_snapshot()
-            msg = self.calibration.recenter_steering(nb_data=nb, hand_data=hand)
-            self.calib_msg_lbl.configure(text=msg, text_color=ACCENT_GREEN)
-            logger.info(f"Steering recentered: {msg}")
-
-    def _on_open_mini_hud(self):
-        """Launches floating always-on-top Mini HUD and minimizes main dashboard."""
-        if self.mini_hud and self.mini_hud.winfo_exists():
-            self.mini_hud.lift()
-            return
-
-        self.mini_hud = MiniHUDWindow(
-            parent=self,
-            on_recenter_cb=self._on_recenter_steering,
-            on_stop_cb=self._on_stop_driving,
-            on_expand_cb=self._on_restore_from_mini_hud
-        )
-        self.iconify()
-        logger.info("Mini Floating HUD opened.")
-
-    def _on_restore_from_mini_hud(self):
-        """Restores main window from Mini HUD."""
-        self.deiconify()
-        self.lift()
-        self.focus_force()
+            self._on_start_driving()
 
     def _on_start_driving(self):
         self.is_driving = True
-        self.keyboard_ctrl.check_focus = True
+        self.keyboard_ctrl.check_focus = self.focus_game_only_var.get()
         self.keyboard_ctrl.set_enabled(True)
         self.keyboard_ctrl.rearm_driving()
         self.session_tracker.record_driving_state(True)
-        self.start_btn.configure(fg_color="#008050", text="✔ DRIVING ACTIVE")
-        self.stop_btn.configure(fg_color="#363C4E", text_color=TEXT_WHITE)
-        self.rearm_banner.pack_forget()
-        logger.info("Driving enabled by user.")
+
+        self.drive_btn.configure(fg_color="#CC2936", hover_color="#E03A48", text="⏸ STOP DRIVING")
+        self.drive_hint_lbl.configure(text="✔ DRIVING ACTIVE! Show signs to steer and press keys.", text_color=ACCENT_GREEN)
+        self.mode_tag.configure(text=" 🟢 DRIVING ACTIVE ", fg_color="#0A3822", text_color=ACCENT_GREEN)
+        logger.info("Driving started by user.")
 
     def _on_stop_driving(self):
         self.is_driving = False
         self.keyboard_ctrl.set_enabled(False)
         self.keyboard_ctrl.release_all()
         self.session_tracker.record_driving_state(False)
-        self.start_btn.configure(fg_color="#00A86B", text="▶ START DRIVING")
-        self.stop_btn.configure(fg_color="#2A2F3D", text_color=TEXT_MUTED)
-        self.rearm_banner.pack_forget()
-        self.focus_banner.pack_forget()
+
+        self.drive_btn.configure(fg_color="#00A86B", hover_color="#00C87F", text="▶ START DRIVING")
+        self.drive_hint_lbl.configure(text="Click Start Driving, then show signs to drive!", text_color=TEXT_MUTED)
+        self.mode_tag.configure(text=" ⏸ STANDBY ", fg_color="#1E2430", text_color=TEXT_MUTED)
         logger.info("Driving stopped by user.")
 
     def _on_emergency_stop(self):
-        self.is_driving = False
+        """Immediately release all simulated keys."""
+        self._on_stop_driving()
         self.keyboard_ctrl.emergency_stop()
-        self.session_tracker.record_driving_state(False)
-        self.start_btn.configure(fg_color="#00A86B", text="▶ START DRIVING")
-        self.stop_btn.configure(fg_color="#2A2F3D", text_color=TEXT_MUTED)
-        self.gesture_lbl.configure(text="EMERGENCY STOPPED", text_color=ACCENT_RED)
-        self.rearm_banner.pack_forget()
-        self.focus_banner.pack_forget()
-        logger.warning("Emergency Stop Triggered.")
-
-    def _on_rearm_click(self):
-        self.keyboard_ctrl.rearm_driving()
-        self.rearm_banner.pack_forget()
-        logger.info("User re-armed driving after interruption.")
-
-    def _on_focus_game_click(self):
-        """Brings the Microsoft Edge / Poki browser window to the foreground once."""
-        success, msg = self.keyboard_ctrl.find_and_focus_game_window()
-        if success:
-            self.calib_msg_lbl.configure(text=f"✔ {msg}", text_color=ACCENT_GREEN)
-            self.focus_banner.pack_forget()
-            logger.info(f"Game window focused: {msg}")
-        else:
-            self.calib_msg_lbl.configure(text=f"⚠️ {msg}", text_color=ACCENT_AMBER)
-            logger.warning(f"Could not focus game window: {msg}")
-
-    def _toggle_test_input(self):
-        """Safely tests keyboard simulation in application field before starting game."""
-        self.is_test_mode = not getattr(self, 'is_test_mode', False)
-        self.keyboard_ctrl.set_test_mode(self.is_test_mode)
-
-        if self.is_test_mode:
-            self.test_input_btn.configure(text="⏹ STOP TEST INPUT", fg_color=ACCENT_RED, hover_color="#FF4D79")
-            self.keyboard_ctrl.set_enabled(True)
-            self.keyboard_ctrl.rearm_driving()
-            self.test_input_box.delete(0, "end")
-            self.test_input_box.insert(0, "TEST ACTIVE: Raise index finger ☝️ or turn notebook...")
-            self.test_input_box.focus_set()
-            self.calib_msg_lbl.configure(
-                text="🧪 TEST MODE ACTIVE: Try gestures now! Keys are simulated into the test field.",
-                text_color=ACCENT_CYAN
-            )
-            logger.info("Test input mode started.")
-        else:
-            self.test_input_btn.configure(text="🧪 TEST INPUT (SAFE FIELD)", fg_color="#183D50", hover_color="#235874")
-            self.keyboard_ctrl.release_all()
-            if not self.is_driving:
-                self.keyboard_ctrl.set_enabled(False)
-            self.calib_msg_lbl.configure(
-                text="Test mode stopped. Ready to play!",
-                text_color=ACCENT_GREEN
-            )
-            logger.info("Test input mode stopped.")
+        self.action_banner.configure(text="🛑 EMERGENCY STOP — ALL KEYS RELEASED", fg_color=ACCENT_RED, text_color=TEXT_WHITE)
+        logger.info("Emergency Stop triggered.")
 
     def _on_open_game(self):
+        """Opens Burnout Drift Hilltop in browser."""
         try:
             webbrowser.open(GAME_URL)
         except Exception as e:
             logger.error(f"Error opening browser: {e}")
 
-    def _on_start_notebook_calibration(self):
-        self.calibration.start_notebook_calibration()
-        self.calib_notebook_btn.configure(text="📓 Calibrating...", state="disabled")
-
-    def _on_sample_notebook_color(self):
+    def _on_recenter_steering(self):
+        """Instant recenter of hand or notebook steering."""
         if self.camera_thread:
-            ok, msg = self.camera_thread.sample_notebook_color()
-            self.calib_msg_lbl.configure(
-                text=msg,
-                text_color=ACCENT_GREEN if ok else ACCENT_RED
-            )
+            _, _, hand, nb, _, _ = self.camera_thread.get_latest_snapshot()
+            msg = self.calibration.recenter_steering(nb_data=nb, hand_data=hand)
+            self.action_banner.configure(text=f"🎯 {msg}", fg_color="#1B3828", text_color=ACCENT_GREEN)
 
-    def _on_start_quick_calibration(self):
-        self.calibration.start_quick_calibration()
-        self.calib_quick_btn.configure(text="Sampling...", state="disabled")
-
-    def _on_start_guided_calibration(self):
-        self.calibration.start_guided_calibration()
-        self.calib_guided_btn.configure(text="Sampling...", state="disabled")
-
-    def _on_quick_sens_change(self, val: float):
-        self.calibration.set_steering_sensitivity(val)
-        self.quick_sens_val.configure(text=f"{val:.1f}x")
-
-    def _open_settings(self):
-        SettingsWindow(
-            parent=self,
-            calibration_mgr=self.calibration,
-            keyboard_ctrl=self.keyboard_ctrl,
-            hand_tracker=self.hand_tracker,
-            available_cameras=self.available_cameras,
-            current_cam_index=self.current_cam_index,
-            on_cam_change_cb=self._on_switch_camera,
-            on_settings_applied_cb=self._on_settings_applied
-        )
-
-    def _on_switch_camera(self, new_idx: int):
-        if new_idx != self.current_cam_index:
-            self.current_cam_index = new_idx
-            self._start_camera_thread()
-
-    def _on_settings_applied(self):
-        self.quick_sens_slider.set(self.calibration.steering_sensitivity)
-        self.quick_sens_val.configure(text=f"{self.calibration.steering_sensitivity:.1f}x")
-        status_str = "ON" if self.calibration.two_hand_mode_enabled else "OFF"
-        self.wheel_mode_btn.configure(
-            text=f"🚗 Two-Hand Virtual Wheel: {status_str}",
-            fg_color="#0077BE" if self.calibration.two_hand_mode_enabled else "#252A34"
-        )
-        nb_str = "ON" if self.calibration.notebook_steering_enabled else "OFF"
-        self.notebook_mode_btn.configure(
-            text=f"📓 Notebook Steering: {nb_str}",
-            fg_color="#D97706" if self.calibration.notebook_steering_enabled else "#252A34",
-            hover_color="#F59E0B" if self.calibration.notebook_steering_enabled else "#333A48",
-            text_color="#000000" if self.calibration.notebook_steering_enabled else TEXT_WHITE
-        )
-
-    def _show_session_history_dialog(self):
-        """Display past driving sessions in a clean modal dialog."""
-        history = self.session_tracker.load_history()
-        win = ctk.CTkToplevel(self)
-        win.title("Driving Session History")
-        win.geometry("520x460")
-        win.configure(fg_color=BG_ROOT)
-        win.transient(self)
-
-        lbl = ctk.CTkLabel(win, text="LOCAL DRIVING SESSIONS (RECENT 25)", font=ctk.CTkFont(size=14, weight="bold"), text_color=ACCENT_BLUE)
-        lbl.pack(pady=12)
-
-        scr = ctk.CTkScrollableFrame(win, fg_color=BG_CARD)
-        scr.pack(fill="both", expand=True, padx=14, pady=8)
-
-        if not history:
-            ctk.CTkLabel(scr, text="No completed sessions yet. Start driving to build history!", text_color=TEXT_MUTED).pack(pady=30)
+    def _on_mode_change(self, mode: str):
+        if "Notebook" in mode:
+            self.calibration.set_notebook_steering(True)
+            self.calibration.set_steering_mode("notebook")
         else:
-            for s in history:
-                row = ctk.CTkFrame(scr, fg_color=BG_CARD_INNER, corner_radius=6)
-                row.pack(fill="x", padx=6, pady=4)
-                ctk.CTkLabel(row, text=f"📅 {s.get('timestamp', 'Unknown')}", font=ctk.CTkFont(size=11, weight="bold"), text_color=TEXT_WHITE).pack(anchor="w", padx=10, pady=(6, 2))
-                stats_str = f"Mode: {s.get('mode', 'live').upper()} | Duration: {s.get('duration_seconds', 0)}s | Driving Time: {s.get('driving_time_seconds', 0)}s | Interruptions: {s.get('interruptions', 0)}"
-                ctk.CTkLabel(row, text=stats_str, font=ctk.CTkFont(size=10), text_color=TEXT_MUTED).pack(anchor="w", padx=10, pady=(0, 6))
+            self.calibration.set_notebook_steering(False)
+            self.calibration.set_steering_mode("hand")
+        self.calibration.save()
 
-        btn_row = ctk.CTkFrame(win, fg_color="transparent")
-        btn_row.pack(fill="x", padx=14, pady=10)
-
-        def clear_and_refresh():
-            self.session_tracker.clear_history()
-            win.destroy()
-
-        ctk.CTkButton(btn_row, text="Clear History", fg_color="#363C4E", hover_color=ACCENT_RED, command=clear_and_refresh).pack(side="left")
-        ctk.CTkButton(btn_row, text="Close", fg_color=ACCENT_BLUE, hover_color="#00B4DB", text_color="#000", command=win.destroy).pack(side="right")
+    def _on_preset_change(self, preset: str):
+        if "Beginner" in preset:
+            self.calibration.apply_preset("beginner")
+        elif "Pro" in preset:
+            self.calibration.apply_preset("pro")
+        else:
+            self.calibration.apply_preset("normal")
+        self.calibration.save()
 
     def _update_ui_loop(self):
         """Periodic UI update loop (~30 FPS)."""
+        if self._is_closing:
+            return
+
         if self.camera_thread:
             pil_img, state, hand, nb, fps, is_connected = self.camera_thread.get_latest_snapshot()
 
-            # 1. Video Preview
+            # 1. Update Video Preview
             if pil_img:
-                box_w = max(400, self.video_box.winfo_width())
-                box_h = max(300, self.video_box.winfo_height())
-                scaled_w = box_w
-                scaled_h = int(box_w * 0.75)
-                if scaled_h > box_h:
-                    scaled_h = box_h
-                    scaled_w = int(box_h * (4.0 / 3.0))
+                bw = self.video_box.winfo_width()
+                bh = self.video_box.winfo_height()
+                if bw < 50:
+                    bw, bh = 640, 480
 
-                resized = pil_img.resize((scaled_w, scaled_h), Image.Resampling.BILINEAR)
-                ctk_img = ctk.CTkImage(light_image=resized, dark_image=resized, size=(scaled_w, scaled_h))
+                target_w = bw
+                target_h = int(bw * 0.75)
+                if target_h > bh:
+                    target_h = bh
+                    target_w = int(bh * (4.0 / 3.0))
+
+                target_w = max(320, min(640, target_w))
+                target_h = max(240, min(480, target_h))
+
+                resized = pil_img.resize((target_w, target_h), Image.Resampling.BILINEAR)
+                ctk_img = ctk.CTkImage(light_image=resized, dark_image=resized, size=(target_w, target_h))
                 self.video_label.configure(image=ctk_img, text="")
                 self.video_label.image = ctk_img
 
-            # 2. Connection Status
-            if is_connected:
-                self.cam_status_lbl.configure(text=f"CONNECTED (CAM #{self.current_cam_index})", text_color=ACCENT_GREEN)
+            # 2. Update Hero Action Banner
+            if not self.is_driving:
+                if hand.is_detected:
+                    self.action_banner.configure(
+                        text=f"✋ STANDBY — Sign: {state.gesture_name} (Click 'START DRIVING' to enable keys)",
+                        fg_color="#1E2430",
+                        text_color=ACCENT_BLUE
+                    )
+                else:
+                    self.action_banner.configure(
+                        text="👋 SHOW HAND IN CAMERA • CLICK 'START DRIVING' TO PLAY",
+                        fg_color="#161A24",
+                        text_color=TEXT_MUTED
+                    )
             else:
-                self.cam_status_lbl.configure(text="DISCONNECTED", text_color=ACCENT_RED)
+                # Active driving banner with bright colors
+                if state.accelerate:
+                    self.action_banner.configure(
+                        text="☝️ GAS ACTIVE — [ W / UP ] IS BEING PRESSED",
+                        fg_color="#0D4722",
+                        text_color=ACCENT_GREEN
+                    )
+                elif state.brake:
+                    self.action_banner.configure(
+                        text="✊ BRAKE ACTIVE — [ S / DOWN ] IS BEING PRESSED",
+                        fg_color="#5C1420",
+                        text_color="#FF4D6D"
+                    )
+                elif state.handbrake:
+                    self.action_banner.configure(
+                        text="✌️ DRIFT ACTIVE — [ SPACEBAR ] IS BEING PRESSED",
+                        fg_color="#113F5C",
+                        text_color=ACCENT_BLUE
+                    )
+                elif state.steer_left:
+                    self.action_banner.configure(
+                        text=f"◀ STEERING LEFT ({abs(state.steering_val)*100:.0f}%) — [ A / LEFT ] PRESSED",
+                        fg_color="#473200",
+                        text_color=ACCENT_AMBER
+                    )
+                elif state.steer_right:
+                    self.action_banner.configure(
+                        text=f"▶ STEERING RIGHT ({abs(state.steering_val)*100:.0f}%) — [ D / RIGHT ] PRESSED",
+                        fg_color="#473200",
+                        text_color=ACCENT_AMBER
+                    )
+                elif hand.is_detected:
+                    self.action_banner.configure(
+                        text="✋ COASTING — [ ALL KEYS RELEASED ]",
+                        fg_color="#182030",
+                        text_color="#A0AEC0"
+                    )
+                else:
+                    self.action_banner.configure(
+                        text="👋 SHOW HAND TO CAMERA TO DRIVE",
+                        fg_color="#201A10",
+                        text_color=ACCENT_AMBER
+                    )
 
-            # 3. 11 Real-Time Diagnostic States (Step 6)
-            # 1) HAND DETECTED: YES / NO
-            if hand.is_detected:
-                self.diag_hand_detected_lbl.configure(text="YES", text_color=ACCENT_GREEN)
+            # 3. Update Steering Gauge
+            pct = state.steering_val
+            self.steer_prog.set(0.5 + (pct * 0.5))
+            if abs(pct) < 0.05:
+                self.steer_lbl.configure(text="CENTER (0.0°)", text_color=TEXT_WHITE)
+            elif pct < 0:
+                self.steer_lbl.configure(text=f"LEFT ({abs(pct)*100:.0f}%)", text_color=ACCENT_BLUE)
             else:
-                self.diag_hand_detected_lbl.configure(text="NO", text_color=ACCENT_AMBER)
+                self.steer_lbl.configure(text=f"RIGHT ({pct*100:.0f}%)", text_color=ACCENT_BLUE)
 
-            # 2) RIGHT HAND CONFIDENCE: percentage
-            conf_pct = int(hand.confidence * 100) if hand.is_detected else 0
-            if hand.is_detected and hand.right_hand_detected:
-                self.diag_hand_conf_lbl.configure(text=f"{conf_pct}% (Right Hand)", text_color=ACCENT_GREEN)
-            elif hand.is_detected:
-                self.diag_hand_conf_lbl.configure(text=f"{conf_pct}% (Left Hand)", text_color=ACCENT_CYAN)
-            else:
-                self.diag_hand_conf_lbl.configure(text="0%", text_color=TEXT_MUTED)
-
-            # 3) INDEX FINGER: UP / DOWN
-            if hand.right_index_raised:
-                self.diag_index_finger_lbl.configure(text="UP (☝️ RAISED)", text_color=ACCENT_GREEN)
-            elif hand.is_detected:
-                self.diag_index_finger_lbl.configure(text="DOWN (LOWERED)", text_color=TEXT_MUTED)
-            else:
-                self.diag_index_finger_lbl.configure(text="DOWN (NO HAND)", text_color=TEXT_MUTED)
-
-            # 4) ACCELERATION: ACTIVE / INACTIVE
-            if state.accelerate:
-                self.diag_accel_lbl.configure(text="ACTIVE (GAS 100%)", text_color=ACCENT_GREEN)
-            else:
-                self.diag_accel_lbl.configure(text="INACTIVE (COAST)", text_color=TEXT_MUTED)
-
-            # 5) NOTEBOOK DETECTED: YES / NO
-            if nb and nb.is_detected:
-                self.diag_nb_detected_lbl.configure(text="YES (LOCKED)", text_color=ACCENT_GREEN)
-                self.diag_nb_angle_lbl.configure(
-                    text=f"{nb.rotation_angle:+.1f}° (Pitch {nb.pitch_angle:+.1f}°)",
-                    text_color=ACCENT_CYAN
-                )
-            else:
-                self.diag_nb_detected_lbl.configure(text="NO (SEARCHING)", text_color=ACCENT_AMBER)
-                self.diag_nb_angle_lbl.configure(text="0.0°", text_color=TEXT_MUTED)
-
-            # 6) STEERING: LEFT / CENTER / RIGHT
-            if state.steer_left:
-                pct = int(abs(state.steering_val) * 100)
-                self.diag_steering_lbl.configure(text=f"LEFT ({pct}%)", text_color=ACCENT_BLUE)
-            elif state.steer_right:
-                pct = int(abs(state.steering_val) * 100)
-                self.diag_steering_lbl.configure(text=f"RIGHT ({pct}%)", text_color=ACCENT_BLUE)
-            else:
-                self.diag_steering_lbl.configure(text="CENTER", text_color=TEXT_MUTED)
-
-            # 7) BRAKING: ACTIVE / INACTIVE
-            if state.brake:
-                brk_type = "NOTEBOOK PITCH" if (nb and nb.is_detected and nb.is_braking) else "FIST"
-                self.diag_brake_lbl.configure(text=f"ACTIVE ({brk_type})", text_color=ACCENT_RED)
-            else:
-                self.diag_brake_lbl.configure(text="INACTIVE", text_color=TEXT_MUTED)
-
-            # 8) GAME FOCUS: YES / NO
-            is_game_focused, focus_str = self.keyboard_ctrl.get_focus_status()
-            if is_game_focused:
-                self.diag_game_focus_lbl.configure(text=f"YES ({focus_str})", text_color=ACCENT_GREEN)
-            else:
-                self.diag_game_focus_lbl.configure(
-                    text=f"NO ({focus_str})",
-                    text_color=ACCENT_RED if self.is_driving else ACCENT_AMBER
-                )
-
-            # 9) KEYBOARD EVENT: last event sent
-            last_ev = self.keyboard_ctrl.get_last_event()
-            self.diag_kb_event_lbl.configure(text=last_ev)
-
-            # 10) ACTIVE KEYS: actual keys held by the controller
-            active_keys = self.keyboard_ctrl.get_active_keys()
-            active_str = ", ".join(sorted(list(active_keys))).upper() if active_keys else "NONE"
-            self.diag_active_keys_lbl.configure(
-                text=active_str,
-                text_color=ACCENT_GREEN if active_keys else TEXT_MUTED
-            )
-
-            # Live Test Input Box Update in Test Mode
-            if getattr(self, 'is_test_mode', False) and active_keys:
-                self.test_input_box.delete(0, "end")
-                self.test_input_box.insert(0, f"ACTIVE KEYS: {active_str} | {last_ev}")
-
-            # 4. Engine FPS
-            self.fps_lbl.configure(text=f"{fps:.1f} FPS")
-
-            # 5. Steering Gauge
-            prog_val = (state.steering_val + 1.0) / 2.0
-            self.steer_prog.set(max(0.0, min(1.0, prog_val)))
-
-            if state.steer_left:
-                pct = int(abs(state.steering_val) * 100)
-                self.steer_deg_lbl.configure(text=f"LEFT ({pct}%)", text_color=ACCENT_BLUE)
-            elif state.steer_right:
-                pct = int(abs(state.steering_val) * 100)
-                self.steer_deg_lbl.configure(text=f"RIGHT ({pct}%)", text_color=ACCENT_BLUE)
-            else:
-                self.steer_deg_lbl.configure(text="CENTER (DEADZONE)", text_color=TEXT_MUTED)
-
-            # 6. Active Badges
-            mapping = self.keyboard_ctrl.get_mapping()
-
+            # 4. Update Key Badges Glow
+            active_actions = state.to_action_dict()
             for action_key, badge in self.key_badges.items():
-                mapped_physical = mapping.get(action_key, "")
-                is_active = (mapped_physical in active_keys) and (self.is_driving or self.is_practice_mode or getattr(self, 'is_test_mode', False))
-
+                is_active = active_actions.get(action_key, False) and (self.is_driving or self.keyboard_ctrl.practice_mode)
                 if is_active:
-                    if action_key == "brake":
-                        badge.configure(fg_color=ACCENT_RED, text_color=TEXT_WHITE)
-                    elif action_key == "accelerate":
-                        badge.configure(fg_color="#00A86B", text_color=TEXT_WHITE)
+                    if action_key == "accelerate":
+                        badge.configure(fg_color="#00A86B", text_color="#FFFFFF")
+                    elif action_key == "brake":
+                        badge.configure(fg_color="#E02555", text_color="#FFFFFF")
+                    elif action_key in ("steer_left", "steer_right"):
+                        badge.configure(fg_color="#D97706", text_color="#FFFFFF")
                     elif action_key == "handbrake":
-                        badge.configure(fg_color="#B5179E", text_color=TEXT_WHITE)
-                    else:
-                        badge.configure(fg_color="#0077BE", text_color=TEXT_WHITE)
+                        badge.configure(fg_color="#0284C7", text_color="#FFFFFF")
                 else:
-                    badge.configure(fg_color="#171A21", text_color="#555E6D")
+                    badge.configure(fg_color="#141822", text_color="#454D5D")
 
-            # 9. Calibration State & Feedback
-            if self.calibration.is_calibrating:
-                msg, prog = self.camera_thread.calibration_feedback
-                self.calib_prog_bar.set(prog)
-                self.calib_msg_lbl.configure(text=msg, text_color=ACCENT_BLUE)
-            else:
-                self.calib_prog_bar.set(1.0 if self.calibration.config.get("is_calibrated") else 0.0)
-                if self.calibration.config.get("notebook_calibrated"):
-                    neutral = float(self.calibration.config.get("notebook_neutral_angle", 0.0))
-                    self.calib_msg_lbl.configure(text=f"Notebook Calibrated (Neutral: {neutral:+.1f}°)", text_color=ACCENT_GREEN)
-                else:
-                    self.calib_msg_lbl.configure(text="Neutral Centered & Calibrated", text_color=ACCENT_GREEN)
-                self.calib_notebook_btn.configure(text="📓 5-STEP WIZARD", state="normal")
-                self.calib_quick_btn.configure(text="🎯 Quick Hand (2.5s)", state="normal")
-                self.calib_guided_btn.configure(text="📐 Hand Range (3-Step)", state="normal")
-
-            # 10. Game Window Focus Check & Warnings
-            is_game_focused, focus_str = self.keyboard_ctrl.get_focus_status()
-            if is_game_focused:
-                self.game_focus_lbl.configure(text=focus_str, text_color=ACCENT_GREEN)
-            else:
-                self.game_focus_lbl.configure(text=focus_str, text_color=ACCENT_RED if self.is_driving else ACCENT_AMBER)
-
-            # Focus Warning Banner under video
-            if self.is_driving and not self.is_practice_mode and not self.keyboard_ctrl.is_interrupted:
-                if not is_game_focused:
-                    self.focus_banner.pack(fill="x", padx=10, pady=(6, 2), before=self.video_box)
-                else:
-                    self.focus_banner.pack_forget()
-            else:
-                self.focus_banner.pack_forget()
-
-            # 11. Safety Re-Arm Banner check
-            if self.keyboard_ctrl.is_interrupted and self.is_driving and not self.is_practice_mode:
-                self.rearm_banner.pack(fill="x", padx=10, pady=(6, 2), before=self.video_box)
-            else:
-                self.rearm_banner.pack_forget()
-
-            # 12. Mini Floating HUD sync
-            if self.mini_hud and self.mini_hud.winfo_exists():
-                self.mini_hud.update_telemetry(state, is_game_focused, self.is_driving)
-
-            # 13. Live Session Stats Update
-            live_stats = self.session_tracker.get_live_stats()
-            self.sess_timer_lbl.configure(text=live_stats["elapsed_str"])
-            self.sess_driving_lbl.configure(text=live_stats["driving_time_str"])
-            self.sess_interrupt_lbl.configure(text=str(live_stats["interruptions"]))
-
-        if not getattr(self, '_is_closing', False):
-            self._loop_after_id = self.after(33, self._update_ui_loop)
+        self._loop_after_id = self.after(33, self._update_ui_loop)
 
     def _on_close(self):
-        logger.info("Application closing...")
+        """Clean application shutdown."""
         self._is_closing = True
-        if getattr(self, '_loop_after_id', None):
+        logger.info("Application closing...")
+        if self._loop_after_id:
             try:
                 self.after_cancel(self._loop_after_id)
             except Exception:
                 pass
-        if self.mini_hud and self.mini_hud.winfo_exists():
-            try:
-                self.mini_hud.destroy()
-            except Exception:
-                pass
-        self.session_tracker.end_session()
-        self.keyboard_ctrl.shutdown()
+
+        if self.keyboard_ctrl:
+            self.keyboard_ctrl.emergency_stop()
+
         if self.camera_thread:
             self.camera_thread.stop()
-        self.hand_tracker.close()
-        try:
-            self.destroy()
-        except Exception:
-            pass
-        self.quit()
+            self.camera_thread.join(timeout=1.0)
+
+        if self.session_tracker:
+            self.session_tracker.end_session()
+
+        self.destroy()
+
+
+if __name__ == "__main__":
+    app = MainWindow()
+    app.mainloop()

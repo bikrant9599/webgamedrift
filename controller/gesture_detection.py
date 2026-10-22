@@ -119,23 +119,21 @@ class GestureDetector:
                 is_brake_raw = True
                 is_notebook_brake = True
         elif hand.is_detected:
-            # Only evaluate hand brake if right index finger is NOT raised
-            if not hand.right_index_raised:
-                is_brake_raw = self._check_brake(hand, brake_type)
-                is_handbrake_raw = self._check_handbrake(hand, handbrake_type)
+            # Fist gesture triggers brake (S / Down)
+            if getattr(hand, "any_fist", False) or self._check_brake(hand, brake_type):
+                is_brake_raw = True
+            # Peace sign gesture triggers handbrake/drift (Spacebar)
+            if getattr(hand, "any_peace_sign", False) or self._check_handbrake(hand, handbrake_type):
+                is_handbrake_raw = True
 
-                if hand.is_two_handed and hand.second_fingers_extended:
-                    ext1 = hand.fingers_extended
-                    ext2 = hand.second_fingers_extended
-                    # Two-handed fist brake requires BOTH hands to be clenched fists
-                    if len(ext1) >= 5 and len(ext2) >= 5:
-                        fist1 = (not ext1[1]) and (not ext1[2]) and (not ext1[3]) and (not ext1[4])
-                        fist2 = (not ext2[1]) and (not ext2[2]) and (not ext2[3]) and (not ext2[4])
-                        if fist1 and fist2:
-                            is_brake_raw = True
+        # Check if index finger is raised on any hand (Gas)
+        has_index_up = getattr(hand, "any_index_raised", False) or hand.right_index_raised
+        if not has_index_up and hand.is_detected and len(hand.fingers_extended) >= 5:
+            if hand.fingers_extended[1] and not hand.fingers_extended[2] and not hand.fingers_extended[3]:
+                has_index_up = True
 
-        # If right index finger is raised, override hand brake to allow clean gas acceleration
-        if hand.right_index_raised and not is_notebook_brake:
+        # If index finger is raised, cancel brake to allow smooth acceleration
+        if has_index_up and not is_notebook_brake:
             is_brake_raw = False
 
         if is_brake_raw:
@@ -156,24 +154,19 @@ class GestureDetector:
         is_handbrake_confirmed = (self._handbrake_counter >= confirm_frames)
 
         # -------------------------------------------------------------
-        # 2. ACCELERATION DETECTION
+        # 2. ACCELERATION DETECTION (POINT UP / INDEX FINGER)
         # -------------------------------------------------------------
-        # Priority: Right-Hand Raised Index Finger Gesture
         is_accel_candidate = False
 
-        if hand.is_detected and hand.right_hand_detected:
-            if hand.right_index_raised:
-                self._right_index_counter += 1
-            else:
-                self._right_index_counter = 0
-
+        if hand.is_detected and has_index_up:
+            self._right_index_counter += 1
             if self._right_index_counter >= confirm_frames:
                 is_accel_candidate = True
                 state.right_index_active = True
         else:
             self._right_index_counter = 0
 
-        # Fallback to gesture accel mode if right-hand index finger is not used
+        # Fallback to gesture accel mode if index finger is not used
         if not is_accel_candidate and (not (notebook and notebook.is_detected)) and hand.is_detected:
             accel_mode = self.calib.config.get("accel_mode", "forward_push")
             if self._check_acceleration_fallback(hand, accel_mode):
@@ -313,50 +306,49 @@ class GestureDetector:
             return 0.0, False, False
 
     def _compute_hand_steering(self, hand: HandData) -> Tuple[float, bool, bool]:
-        """Fallback hand steering (two-hand wheel or single-hand)."""
+        """Hand steering: two-hand wheel or single-hand tilt and position."""
         sensitivity = max(0.2, self.calib.steering_sensitivity)
         mode = self.calib.steering_mode
 
         if hand.is_two_handed or (mode == "two_hand_wheel" and not hand.is_fallback):
             wheel_deg = hand.wheel_angle * sensitivity
-            deadzone_angle = float(self.calib.config.get("deadzone_angle", 12.0))
-            max_angle = float(self.calib.config.get("max_steer_angle", 45.0))
+            deadzone_angle = float(self.calib.config.get("deadzone_angle", 10.0))
+            max_angle = float(self.calib.config.get("max_steer_angle", 40.0))
 
             if wheel_deg < -deadzone_angle:
-                val = max(-1.0, (wheel_deg + deadzone_angle) / (max_angle - deadzone_angle))
+                val = max(-1.0, (wheel_deg + deadzone_angle) / max(5.0, max_angle - deadzone_angle))
                 return val, True, False
             elif wheel_deg > deadzone_angle:
-                val = min(1.0, (wheel_deg - deadzone_angle) / (max_angle - deadzone_angle))
+                val = min(1.0, (wheel_deg - deadzone_angle) / max(5.0, max_angle - deadzone_angle))
                 return val, False, True
             else:
                 return 0.0, False, False
 
-        elif mode == "tilt":
-            angle = hand.tilt_angle * sensitivity
-            deadzone_angle = float(self.calib.config.get("deadzone_angle", 12.0))
-            max_angle = float(self.calib.config.get("max_steer_angle", 45.0))
-            if angle < -deadzone_angle:
-                val = max(-1.0, (angle + deadzone_angle) / (max_angle - deadzone_angle))
-                return val, True, False
-            elif angle > deadzone_angle:
-                val = min(1.0, (angle - deadzone_angle) / (max_angle - deadzone_angle))
-                return val, False, True
-            else:
-                return 0.0, False, False
+        # Single hand: check tilt angle first
+        angle = hand.tilt_angle * sensitivity
+        deadzone_angle = float(self.calib.config.get("deadzone_angle", 8.0))
+        max_angle = float(self.calib.config.get("max_steer_angle", 35.0))
+        if angle < -deadzone_angle:
+            val = max(-1.0, (angle + deadzone_angle) / max(5.0, max_angle - deadzone_angle))
+            return val, True, False
+        elif angle > deadzone_angle:
+            val = min(1.0, (angle - deadzone_angle) / max(5.0, max_angle - deadzone_angle))
+            return val, False, True
+
+        # Secondary: Position displacement
+        nx = self.calib.neutral_x
+        deadzone = self.calib.deadzone_x
+        range_span = max(0.10, self.calib.comfortable_range_x)
+        dx = (hand.hand_center[0] - nx) * sensitivity
+
+        if dx < -deadzone:
+            val = max(-1.0, (dx + deadzone) / range_span)
+            return val, True, False
+        elif dx > deadzone:
+            val = min(1.0, (dx - deadzone) / range_span)
+            return val, False, True
         else:
-            nx = self.calib.neutral_x
-            deadzone = self.calib.deadzone_x
-            range_span = max(0.10, self.calib.comfortable_range_x)
-            dx = (hand.hand_center[0] - nx) * sensitivity
-
-            if dx < -deadzone:
-                val = max(-1.0, (dx + deadzone) / range_span)
-                return val, True, False
-            elif dx > deadzone:
-                val = min(1.0, (dx - deadzone) / range_span)
-                return val, False, True
-            else:
-                return 0.0, False, False
+            return 0.0, False, False
 
     def _check_brake(self, hand: HandData, brake_type: str) -> bool:
         if hand.right_index_raised:

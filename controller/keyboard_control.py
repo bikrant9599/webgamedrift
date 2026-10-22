@@ -174,7 +174,7 @@ class KeyboardController:
         self._emergency_stopped = False
 
         # Safety: Interruption & Re-Arm State
-        self.require_manual_resume = True
+        self.require_manual_resume = False
         self.is_interrupted = False
         self.interruption_reason = ""
 
