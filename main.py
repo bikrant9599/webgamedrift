@@ -16,6 +16,13 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+# Silence MediaPipe C++ clearcut telemetry & TFLite warnings from polluting stderr
+try:
+    from controller.telemetry_suppress import silence_clearcut_telemetry
+    silence_clearcut_telemetry()
+except Exception:
+    pass
+
 # Configure logging
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 logging.basicConfig(

@@ -24,8 +24,10 @@ from controller.session_stats import SessionTracker
 logger = logging.getLogger("burnout.camera")
 
 
-def list_available_cameras(max_test: int = 2) -> List[int]:
-    """Discover available camera indices using DirectShow on Windows."""
+def list_available_cameras(max_test: int = 1) -> List[int]:
+    """Fast camera discovery without slow multi-index DirectShow timeouts."""
+    if max_test <= 1:
+        return [0]
     available = []
     for index in range(max_test):
         backend = cv2.CAP_DSHOW if sys.platform.startswith("win") else cv2.CAP_ANY
@@ -108,6 +110,12 @@ class CameraThread(threading.Thread):
             cap.set(cv2.CAP_PROP_FPS, self.target_fps)
             self.is_connected = True
             logger.info("Camera successfully connected.")
+            logger.info("=" * 60)
+            logger.info("🟢 BURNOUT CAMERA DRIVE IS ACTIVE & READY!")
+            logger.info("   • Controller Window is open and tracking your gestures.")
+            logger.info("   • Browser Game URL: https://poki.com/en/g/burnout-drift-hilltop")
+            logger.info("   • Click '▶ START DRIVING' in the controller window to race!")
+            logger.info("=" * 60)
         else:
             self.is_connected = False
             logger.warning(f"Failed to open camera index {self.camera_index}.")

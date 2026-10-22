@@ -91,12 +91,29 @@ class MainWindow(ctk.CTk):
         self._build_header()
         self._build_main_layout()
 
+        # Instantly render and bring window to foreground
+        self.update_idletasks()
+        try:
+            self.lift()
+            self.attributes("-topmost", True)
+            self.after(600, lambda: self.attributes("-topmost", False))
+            self.focus_force()
+        except Exception:
+            pass
+
         # Global hotkey Escape for Emergency Stop
         self.bind("<Escape>", lambda event: self._on_emergency_stop())
 
         # Start Camera Thread & Session
         self.session_tracker.start_session(mode="live")
         self._start_camera_thread()
+
+        # Automatically launch browser game tab
+        try:
+            webbrowser.open(GAME_URL)
+            logger.info(f"Opening browser game: {GAME_URL}")
+        except Exception as e:
+            logger.warning(f"Could not open browser automatically: {e}")
 
         # Start UI loop (~30 FPS)
         self._update_ui_loop()

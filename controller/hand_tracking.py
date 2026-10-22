@@ -21,6 +21,12 @@ ASSET_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file_
 DEFAULT_MODEL_PATH = os.path.join(ASSET_DIR, "hand_landmarker.task")
 
 try:
+    from controller.telemetry_suppress import silence_clearcut_telemetry
+    silence_clearcut_telemetry()
+except Exception:
+    pass
+
+try:
     import cv2
     import mediapipe as mp
     MEDIAPIPE_AVAILABLE = True
